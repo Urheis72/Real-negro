@@ -3,142 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jarvis App</title>
+    <title>Jarvis Pro</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body { background: #0a0a0a; color: white; font-family: sans-serif; overflow: hidden; }
-        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        input { transition: all 0.3s; }
-        input:focus { border-color: #f97316; box-shadow: 0 0 15px rgba(249, 115, 22, 0.2); }
+        body { background: #000; color: white; font-family: sans-serif; }
+        .cam-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; background: #000; display: none; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; }
     </style>
 </head>
 <body>
     <div id="root"></div>
-
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         function App() {
-            // Lógica de "Entrar Direto": Verifica se já existe a chave no celular
             const [isAuth, setIsAuth] = useState(localStorage.getItem('jarvis_logged') === 'true');
-            const [step, setStep] = useState(1);
-            const [phone, setPhone] = useState('');
-            const [code, setCode] = useState('');
-            const [loading, setLoading] = useState(false);
+            const [msg, setMsg] = useState([]);
+            const [input, setInput] = useState('');
+            const [listening, setListening] = useState(false);
+            const [showCam, setShowCam] = useState(false);
+            const videoRef = useRef(); const canvasRef = useRef();
+            const silenceTimer = useRef(null);
 
-            // Função para enviar o número
-            const handleSendPhone = async () => {
-                setLoading(true);
-                try {
-                    await fetch('./auth/send_code', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ phone })
-                    });
-                    setStep(2);
-                } catch (e) { alert("Erro ao enviar. Verifique o número."); }
-                setLoading(false);
+            // --- FUNÇÃO DE VOZ (Speech-to-Text) ---
+            const toggleMic = () => {
+                const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!Speech) return alert("Navegador incompatível");
+                
+                const rec = new Speech();
+                rec.lang = 'pt-BR';
+                rec.continuous = true;
+                rec.interimResults = true;
+
+                rec.onstart = () => setListening(true);
+                rec.onresult = (e) => {
+                    const text = Array.from(e.results).map(r => r[0].transcript).join('');
+                    setInput(text);
+                    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+                    silenceTimer.current = setTimeout(() => { rec.stop(); send(text); }, 3000);
+                };
+                rec.onend = () => setListening(false);
+                rec.start();
             };
 
-            // Função para validar o código e SALVAR PERMANENTE
-            const handleVerify = async () => {
-                setLoading(true);
-                try {
-                    const res = await fetch('./auth/login', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ code })
-                    });
-                    const data = await res.json();
-                    
-                    if (data.status === 'success' || data.session_string) {
-                        // SALVA AQUI: Para não pedir login na próxima vez
-                        localStorage.setItem('jarvis_logged', 'true');
-                        setIsAuth(true);
-                    } else {
-                        alert("Código incorreto.");
-                    }
-                } catch (e) { alert("Erro na verificação."); }
-                setLoading(false);
+            // --- ENVIO ---
+            const send = async (txt) => {
+                const val = txt || input;
+                if (!val.trim()) return;
+                setMsg(p => [...p, { t: 'u', m: val }]);
+                setInput('');
+                const res = await fetch('./perguntar', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ pergunta: val })
+                });
+                const data = await res.json();
+                setMsg(p => [...p, { t: 'a', m: data.resposta }]);
             };
 
-            // TELA DE LOGIN (Só aparece se isAuth for falso)
-            if (!isAuth) {
-                return (
-                    <div className="flex items-center justify-center min-h-screen p-6 bg-black">
-                        <div className="w-full max-w-sm glass p-8 rounded-[2rem] text-center">
-                            <div className="w-20 h-20 bg-orange-600/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-orange-500/50">
-                                <span className="text-3xl">🔥</span>
-                            </div>
-                            <h2 className="text-2xl font-bold mb-2">Bem-vindo</h2>
-                            <p className="text-gray-400 text-sm mb-8">Conecte sua conta para iniciar o Jarvis</p>
+            // --- CÂMERA E FACE API ---
+            const openCam = async () => {
+                setShowCam(true);
+                await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                videoRef.current.srcObject = stream;
+            };
 
-                            {step === 1 ? (
-                                <div className="space-y-4">
-                                    <input 
-                                        type="tel" 
-                                        value={phone} 
-                                        onChange={e => setPhone(e.target.value)}
-                                        placeholder="+55 (DDD) 99999-9999" 
-                                        className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none text-center text-lg"
-                                    />
-                                    <button 
-                                        onClick={handleSendPhone}
-                                        disabled={loading}
-                                        className="w-full bg-orange-600 hover:bg-orange-500 p-4 rounded-2xl font-bold transition-all active:scale-95"
-                                    >
-                                        {loading ? "Enviando..." : "Receber Código"}
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    <input 
-                                        type="number" 
-                                        value={code} 
-                                        onChange={e => setCode(e.target.value)}
-                                        placeholder="Digite o código" 
-                                        className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none text-center text-2xl tracking-[1rem]"
-                                    />
-                                    <button 
-                                        onClick={handleVerify}
-                                        disabled={loading}
-                                        className="w-full bg-green-600 hover:bg-green-500 p-4 rounded-2xl font-bold transition-all active:scale-95"
-                                    >
-                                        {loading ? "Verificando..." : "Entrar no App"}
-                                    </button>
-                                    <button onClick={() => setStep(1)} className="text-xs text-gray-500 underline">Mudar número</button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                );
-            }
+            const onPlay = () => {
+                const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
+                faceapi.matchDimensions(canvasRef.current, displaySize);
+                setInterval(async () => {
+                    const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions());
+                    const resized = faceapi.resizeResults(detections, displaySize);
+                    canvasRef.current.getContext('2d').clearRect(0, 0, displaySize.width, displaySize.height);
+                    faceapi.draw.drawDetections(canvasRef.current, resized);
+                }, 200);
+            };
 
-            // TELA DO CHAT (Já logado)
+            if (!isAuth) return (
+                <div className="flex flex-col items-center justify-center h-screen p-10">
+                    <button onClick={() => {localStorage.setItem('jarvis_logged', 'true'); setIsAuth(true)}} className="bg-orange-600 p-4 rounded-xl font-bold">Entrar no App</button>
+                </div>
+            );
+
             return (
-                <div className="flex flex-col h-screen bg-black">
-                    <header className="p-4 border-b border-white/10 flex justify-between items-center">
-                        <span className="font-bold text-orange-500">JARVIS ONLINE</span>
-                        <button onClick={() => { localStorage.clear(); location.reload(); }} className="text-[10px] text-gray-600">Sair</button>
+                <div className="flex flex-col h-screen max-w-md mx-auto border-x border-white/10">
+                    <header className="p-4 bg-gray-900 flex justify-between items-center border-b border-white/10">
+                        <h1 className="text-orange-500 font-bold tracking-widest">JARVIS v2</h1>
+                        <button onClick={openCam} className="bg-gray-800 p-2 rounded-lg">📷</button>
                     </header>
-                    <div className="flex-1 p-4 overflow-y-auto">
-                        <div className="bg-gray-900 p-4 rounded-2xl border border-white/5">
-                            Sistemas carregados. Olá, como posso ajudar hoje?
-                        </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black">
+                        {msg.map((item, i) => (
+                            <div key={i} className={`flex ${item.t === 'u' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`p-3 rounded-2xl max-w-[85%] ${item.t === 'u' ? 'bg-orange-600' : 'bg-zinc-900 border border-white/5'}`}>
+                                    {item.m}
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                    <footer className="p-4 pb-8 glass rounded-t-[2rem]">
-                        <div className="flex gap-2">
-                            <input className="flex-1 bg-white/5 p-4 rounded-2xl outline-none" placeholder="Perguntar ao Jarvis..." />
-                            <button className="bg-orange-600 p-4 rounded-2xl">➤</button>
-                        </div>
+
+                    <footer className="p-4 bg-gray-900 flex gap-2 items-center">
+                        <button onClick={toggleMic} className={`p-4 rounded-full ${listening ? 'bg-red-600 animate-pulse' : 'bg-gray-800'}`}>🎙️</button>
+                        <input value={input} onChange={e => setInput(e.target.value)} className="flex-1 bg-black p-3 rounded-xl outline-none" placeholder="Digite ou fale..."/>
+                        <button onClick={() => send()} className="bg-orange-600 p-4 rounded-xl font-bold">➤</button>
                     </footer>
+
+                    {showCam && (
+                        <div className="cam-screen" style={{display: 'block'}}>
+                            <video ref={videoRef} onPlay={onPlay} autoPlay muted playsInline />
+                            <canvas ref={canvasRef} />
+                            <button onClick={() => setShowCam(false)} className="absolute top-10 right-5 bg-red-600 p-3 rounded-full font-bold">X</button>
+                        </div>
+                    )}
                 </div>
             );
         }
-
         ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
 </body>
