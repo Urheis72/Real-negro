@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase AI - Jarvis</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- COMPONENTES VISUAIS ---
+        const Flame = ({ className }) => (
+            <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2c1.5 4.5 3 6 6 8-2-1-4-1-6 1 0-3-1-5-3-7 1 3 0 5-2 7 0-4 2-6 5-9z"/>
+            </svg>
+        );
+
+        // --- TELA DE LOGIN ---
+        function LoginScreen({ onLoginSuccess }) {
+            const [step, setStep] = useState(1); // 1: Phone, 2: Code, 3: 2FA
+            const [phone, setPhone] = useState('');
+            const [code, setCode] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [sessionString, setSessionString] = useState('');
+
+            const sendPhone = async () => {
+                setLoading(true); setError('');
+                try {
+                    const res = await fetch('/auth/send_code', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ phone })
+                    });
+                    const data = await res.json();
+                    if (data.error) throw new Error(data.error);
+                    setStep(2);
+                } catch (e) { setError(e.message); }
+                setLoading(false);
+            };
+
+            const sendCode = async () => {
+                setLoading(true); setError('');
+                try {
+                    const res = await fetch('/auth/login', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ code, password })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.status === '2fa_required') {
+                        setStep(3);
+                        setLoading(false);
+                        return;
+                    }
+                    if (data.error) throw new Error(data.error);
+                    
+                    // Sucesso!
+                    setSessionString(data.session_string);
+                    setStep(4); // Tela de sucesso
+                } catch (e) { setError(e.message); }
+                setLoading(false);
+            };
+
+            if (step === 4) {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-6">
+                        <div className="bg-green-900/30 p-8 rounded-2xl border border-green-500/50 max-w-2xl w-full text-center">
+                            <h2 className="text-3xl font-bold text-green-400 mb-4">✅ Login Realizado!</h2>
+                            <p className="mb-4 text-gray-300">IMPORTANTE: Copie a string abaixo e salve nas Variáveis de Ambiente do Render como <strong>SESSION_STRING</strong> para manter o bot online se reiniciar.</p>
+                            <div className="bg-black p-4 rounded border border-gray-700 break-all text-xs font-mono text-gray-400 mb-6 select-all">
+                                {sessionString}
+                            </div>
+                            <button onClick={onLoginSuccess} className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-xl font-bold transition-all">
+                                Entrar no Chat
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-b from-orange-950/20 via-black to-black" />
+                    <div className="relative z-10 w-full max-w-md p-8 bg-gray-900/80 backdrop-blur-xl rounded-3xl border border-orange-500/30 shadow-2xl">
+                        <div className="flex justify-center mb-6">
+                            <Flame className="w-12 h-12 text-orange-500 animate-pulse" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-center mb-6 bg-gradient-to-r from-orange-400 to-yellow-400 bg-clip-text text-transparent">
+                            Conectar Telegram
+                        </h2>
+
+                        {error && <div className="mb-4 p-3 bg-red-900/50 border border-red-500/50 rounded text-red-200 text-sm">{error}</div>}
+
+                        {step === 1 && (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Número (com +55 e DDD)</label>
+                                    <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+5511999999999" className="w-full bg-black/50 border border-orange-500/30 rounded-xl p-3 text-white focus:border-orange-500 outline-none" />
+                                </div>
+                                <button onClick={sendPhone} disabled={loading} className="w-full bg-gradient-to-r from-orange-600 to-orange-700 p-3 rounded-xl font-bold hover:scale-105 transition-all">
+                                    {loading ? 'Enviando...' : 'Receber Código'}
+                                </button>
+                            </div>
+                        )}
+
+                        {step === 2 && (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Código do Telegram</label>
+                                    <input value={code} onChange={e => setCode(e.target.value)} placeholder="12345" className="w-full bg-black/50 border border-orange-500/30 rounded-xl p-3 text-white focus:border-orange-500 outline-none" />
+                                </div>
+                                <button onClick={sendCode} disabled={loading} className="w-full bg-gradient-to-r from-orange-600 to-orange-700 p-3 rounded-xl font-bold hover:scale-105 transition-all">
+                                    {loading ? 'Verificando...' : 'Entrar'}
+                                </button>
+                            </div>
+                        )}
+
+                        {step === 3 && (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Senha de 2 Fatores (2FA)</label>
+                                    <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Sua senha..." className="w-full bg-black/50 border border-orange-500/30 rounded-xl p-3 text-white focus:border-orange-500 outline-none" />
+                                </div>
+                                <button onClick={sendCode} disabled={loading} className="w-full bg-gradient-to-r from-orange-600 to-orange-700 p-3 rounded-xl font-bold hover:scale-105 transition-all">
+                                    {loading ? 'Verificando...' : 'Confirmar Senha'}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // --- APP PRINCIPAL ---
+        function FirebaseAssistant() {
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [checkingAuth, setCheckingAuth] = useState(true);
+            const [messages, setMessages] = useState([{ type: 'assistant', text: 'Olá! Sou seu Assistente Firebase AI. Como posso ajudá-lo hoje?' }]);
+            const [input, setInput] = useState('');
+            const [isProcessing, setIsProcessing] = useState(false);
+            const messagesEndRef = useRef(null);
+
+            useEffect(() => {
+                // Checa se já está logado ao carregar
+                fetch('/auth/status')
+                    .then(r => r.json())
+                    .then(data => {
+                        setIsLoggedIn(data.logged_in);
+                        setCheckingAuth(false);
+                    })
+                    .catch(() => setCheckingAuth(false));
+            }, []);
+
+            useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+            const handleSend = async () => {
+                if (!input.trim()) return;
+                const userMsg = input.trim();
+                setInput('');
+                setMessages(p => [...p, { type: 'user', text: userMsg }]);
+                setIsProcessing(true);
+
+                try {
+                    const res = await fetch('/perguntar', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ pergunta: userMsg })
+                    });
+                    const data = await res.json();
+                    setMessages(p => [...p, { type: 'assistant', text: data.resposta || 'Erro desconhecido.' }]);
+                } catch (err) {
+                    setMessages(p => [...p, { type: 'assistant', text: 'Erro de conexão.' }]);
+                } finally { setIsProcessing(false); }
+            };
+
+            if (checkingAuth) return <div className="min-h-screen bg-black flex items-center justify-center text-orange-500">Carregando...</div>;
+            
+            if (!isLoggedIn) return <LoginScreen onLoginSuccess={() => setIsLoggedIn(true)} />;
+
+            // RENDERIZAÇÃO DO CHAT (Igual ao seu código original)
+            return (
+                <div className="min-h-screen bg-black text-white relative overflow-hidden flex flex-col">
+                    <div className="absolute inset-0 bg-gradient-to-b from-orange-950/20 via-black to-black pointer-events-none" />
+                    
+                    {/* Header */}
+                    <header className="relative z-10 backdrop-blur-xl bg-black/60 border-b border-orange-500/20 p-4">
+                        <div className="max-w-4xl mx-auto flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-600 to-yellow-500 flex items-center justify-center">
+                                <Flame className="w-6 h-6 text-white" />
+                            </div>
+                            <h1 className="text-xl font-bold bg-gradient-to-r from-orange-400 to-yellow-400 bg-clip-text text-transparent">Firebase AI</h1>
+                        </div>
+                    </header>
+
+                    {/* Área de Mensagens */}
+                    <div className="flex-1 overflow-y-auto p-4 relative z-10">
+                        <div className="max-w-4xl mx-auto space-y-4">
+                            {messages.map((msg, i) => (
+                                <div key={i} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`max-w-[80%] p-4 rounded-2xl ${msg.type === 'user' ? 'bg-orange-600/20 border border-orange-600/50' : 'bg-gray-900 border border-gray-800'}`}>
+                                        <p className="whitespace-pre-wrap">{msg.text}</p>
+                                    </div>
+                                </div>
+                            ))}
+                            {isProcessing && <div className="text-orange-500 text-sm animate-pulse">Processando...</div>}
+                            <div ref={messagesEndRef} />
+                        </div>
+                    </div>
+
+                    {/* Input */}
+                    <div className="relative z-10 p-4 bg-black/80 border-t border-orange-500/20">
+                        <div className="max-w-4xl mx-auto flex gap-2">
+                            <input 
+                                value={input}
+                                onChange={e => setInput(e.target.value)}
+                                onKeyPress={e => e.key === 'Enter' && handleSend()}
+                                placeholder="Digite sua mensagem..."
+                                className="flex-1 bg-gray-900 border border-orange-500/30 rounded-xl p-4 focus:border-orange-500 outline-none transition-all"
+                            />
+                            <button onClick={handleSend} disabled={isProcessing} className="bg-orange-600 hover:bg-orange-500 text-white p-4 rounded-xl transition-all">
+                                ➤
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<FirebaseAssistant />);
+    </script>
+</body>
+</html>
