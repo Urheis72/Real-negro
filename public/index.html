@@ -2,184 +2,143 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>J.A.R.V.I.S. System</title>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JARVIS AI</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: { jarvis: '#f97316', dark: '#050505', glass: 'rgba(20, 20, 20, 0.7)' },
-                    animation: { 'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite' }
-                }
-            }
-        }
-    </script>
-    
     <style>
-        /* Estilos Globais e Reset */
-        body { background-color: #000; color: #eee; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        /* Background Canvas */
+        #fire-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.6; }
         
-        /* Efeito Vidro */
-        .glass-panel {
-            background: rgba(10, 10, 10, 0.6);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
-        }
-
-        /* Scrollbar Invisível */
-        .no-scroll::-webkit-scrollbar { display: none; }
-        .no-scroll { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Input Elevado */
-        .input-area {
-            padding-bottom: env(safe-area-inset-bottom, 20px);
-            position: absolute; bottom: 0; left: 0; width: 100%;
-        }
+        /* Glassmorphism */
+        .glass { background: rgba(20, 20, 20, 0.7); backdrop-filter: blur(15px); border: 1px solid rgba(255, 100, 0, 0.1); }
+        .glass-input { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); }
         
-        /* Canvas de Fundo */
-        #fire-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+        /* UX Ajustes */
+        .chat-container { padding-bottom: 120px; /* Espaço para o input flutuante */ }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        
+        /* Animação Voz */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(1.2); opacity: 0; }
+        }
+        .mic-active { animation: pulse-ring 1.5s infinite; background-color: #ea580c !important; }
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <canvas id="fire-canvas"></canvas>
+    
+    <div id="root" class="h-screen w-screen flex flex-col relative z-10"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- COMPONENTE: PARTICULAS DE FOGO (CANVAS) ---
-        const FireBackground = () => {
-            const canvasRef = useRef(null);
+        // --- COMPONENTE DE FUNDO (PARTÍCULAS) ---
+        const initFire = () => {
+            const canvas = document.getElementById('fire-canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
             
-            useEffect(() => {
-                const canvas = canvasRef.current;
-                const ctx = canvas.getContext('2d');
-                let width, height, particles = [];
-
-                const resize = () => {
-                    width = canvas.width = window.innerWidth;
-                    height = canvas.height = window.innerHeight;
-                };
-                window.addEventListener('resize', resize);
-                resize();
-
-                class Particle {
-                    constructor() {
-                        this.reset();
-                    }
-                    reset() {
-                        this.x = Math.random() * width;
-                        this.y = height + Math.random() * 100;
-                        this.speed = 1 + Math.random() * 2;
-                        this.size = 1 + Math.random() * 3;
-                        this.opacity = 0.5 + Math.random() * 0.5;
-                        this.fade = 0.002 + Math.random() * 0.005;
-                    }
-                    update() {
-                        this.y -= this.speed;
-                        this.opacity -= this.fade;
-                        if (this.opacity <= 0) this.reset();
-                    }
-                    draw() {
-                        ctx.beginPath();
-                        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-                        ctx.fillStyle = `rgba(249, 115, 22, ${this.opacity})`; // Cor Laranja Jarvis
-                        ctx.fill();
+            const particles = [];
+            class Particle {
+                constructor() {
+                    this.x = Math.random() * canvas.width;
+                    this.y = canvas.height + Math.random() * 20;
+                    this.size = Math.random() * 3 + 1;
+                    this.speedY = Math.random() * 2 + 0.5;
+                    this.color = `rgba(255, ${Math.floor(Math.random() * 100)}, 0, ${Math.random() * 0.5})`;
+                }
+                update() {
+                    this.y -= this.speedY;
+                    this.size *= 0.98; // Diminui ao subir
+                    if (this.size < 0.2) {
+                        this.y = canvas.height + 10;
+                        this.size = Math.random() * 3 + 1;
                     }
                 }
-
-                for(let i=0; i<60; i++) particles.push(new Particle());
-
-                const animate = () => {
-                    ctx.clearRect(0, 0, width, height);
-                    particles.forEach(p => { p.update(); p.draw(); });
-                    requestAnimationFrame(animate);
-                };
-                animate();
-            }, []);
-
-            return <canvas id="fire-canvas" ref={canvasRef}></canvas>;
-        };
-
-        // --- COMPONENTE PRINCIPAL ---
-        function App() {
-            // Estado de Autenticação Persistente
-            const [isAuth, setIsAuth] = useState(localStorage.getItem('jarvis_token') === 'true');
+                draw() {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
             
-            // Estados do Chat
-            const [step, setStep] = useState(1); // 1: Fone, 2: Codigo
+            for(let i=0; i<80; i++) particles.push(new Particle());
+            
+            const animate = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                particles.forEach(p => { p.update(); p.draw(); });
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        // --- APLICAÇÃO PRINCIPAL ---
+        function App() {
+            const [isAuth, setIsAuth] = useState(localStorage.getItem('jarvis_session') === 'true');
+            const [step, setStep] = useState(1);
             const [phone, setPhone] = useState('');
             const [code, setCode] = useState('');
             const [loading, setLoading] = useState(false);
             
-            const [messages, setMessages] = useState([{ type: 'bot', text: 'Sistemas online. J.A.R.V.I.S. pronto.' }]);
+            const [messages, setMessages] = useState([{role: 'ai', text: 'Jarvis online. Sistemas prontos.'}]);
             const [input, setInput] = useState('');
             const [listening, setListening] = useState(false);
-            const [cameraOpen, setCameraOpen] = useState(false);
+            const [showCam, setShowCam] = useState(false);
             
-            const videoRef = useRef();
-            const canvasRef = useRef();
-            const msgEndRef = useRef();
+            const chatEndRef = useRef(null);
+            const videoRef = useRef(null);
 
-            useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+            useEffect(() => { initFire(); }, []);
+            useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-            // --- FUNÇÕES DE AUTH ---
-            const handleLogin = async () => {
-                if (step === 1) {
-                    setLoading(true);
-                    try {
-                        await fetch('./auth/send_code', { 
-                            method: 'POST', headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ phone }) 
-                        });
-                        setStep(2);
-                    } catch(e) { alert("Erro ao enviar SMS"); }
-                    setLoading(false);
-                } else {
-                    setLoading(true);
-                    try {
-                        const res = await fetch('./auth/login', { 
-                            method: 'POST', headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ code }) 
-                        });
-                        const data = await res.json();
-                        if (data.status === 'success' || data.session) {
-                            localStorage.setItem('jarvis_token', 'true');
-                            setIsAuth(true);
-                        } else { alert("Código inválido"); }
-                    } catch(e) { alert("Erro ao logar"); }
-                    setLoading(false);
-                }
+            // --- LÓGICA DE ÁUDIO ---
+            const playAudio = (b64) => {
+                if (!b64) return;
+                const snd = new Audio("data:audio/mp3;base64," + b64);
+                snd.play().catch(e => console.log("Auto-play bloqueado pelo browser", e));
             };
 
-            // --- FUNÇÕES DE CHAT ---
-            const sendMessage = async (txt) => {
-                const textToSend = txt || input;
-                if (!textToSend.trim()) return;
-
-                setMessages(prev => [...prev, { type: 'user', text: textToSend }]);
+            // --- LÓGICA DE ENVIO ---
+            const handleSend = async (txtOverride) => {
+                const text = txtOverride || input;
+                if (!text.trim()) return;
+                
+                // UI Update imediato
+                setMessages(prev => [...prev, {role: 'user', text}]);
                 setInput('');
-
+                
                 try {
                     const res = await fetch('./perguntar', {
-                        method: 'POST', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ pergunta: textToSend })
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ 
+                            pergunta: text,
+                            session_id: localStorage.getItem('session_id') || 'sessao_unica'
+                        })
                     });
                     const data = await res.json();
-                    setMessages(prev => [...prev, { type: 'bot', text: data.resposta }]);
-                } catch {
-                    setMessages(prev => [...prev, { type: 'bot', text: 'Erro de conexão com o servidor.' }]);
+                    
+                    // Adiciona resposta
+                    setMessages(prev => [...prev, {role: 'ai', text: data.resposta}]);
+                    
+                    // Toca áudio
+                    if (data.audio) playAudio(data.audio);
+
+                } catch (e) {
+                    setMessages(prev => [...prev, {role: 'ai', text: "Erro de conexão com o servidor."}]);
                 }
             };
 
+            // --- VOZ (Speech API) ---
             const toggleMic = () => {
                 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
                 if (!Speech) return alert("Navegador sem suporte a voz.");
@@ -187,148 +146,138 @@
                 const rec = new Speech();
                 rec.lang = 'pt-BR';
                 rec.onstart = () => setListening(true);
+                rec.onend = () => setListening(false);
                 rec.onresult = (e) => {
                     const t = e.results[0][0].transcript;
-                    setInput(t);
-                    setTimeout(() => sendMessage(t), 2500); // Envia após 2.5s
+                    handleSend(t); // Envia direto ao terminar de falar
                 };
-                rec.onend = () => setListening(false);
                 rec.start();
             };
 
-            // --- CÂMERA ---
-            const toggleCamera = async () => {
-                if (!cameraOpen) {
-                    setCameraOpen(true);
-                    await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
-                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                    // Pequeno delay para garantir que o elemento video existe no DOM
-                    setTimeout(() => { if(videoRef.current) videoRef.current.srcObject = stream; }, 100);
+            // --- LOGIN ---
+            const doLogin = async () => {
+                setLoading(true);
+                if (step === 1) {
+                    await fetch('./auth/send_code', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({phone})
+                    });
+                    setStep(2);
                 } else {
-                    setCameraOpen(false);
-                }
-            };
-
-            const handleVideoPlay = () => {
-                setInterval(async () => {
-                    if (videoRef.current && canvasRef.current) {
-                        const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
-                        faceapi.matchDimensions(canvasRef.current, displaySize);
-                        const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions());
-                        const resized = faceapi.resizeResults(detections, displaySize);
-                        const ctx = canvasRef.current.getContext('2d');
-                        ctx.clearRect(0, 0, displaySize.width, displaySize.height);
-                        faceapi.draw.drawDetections(canvasRef.current, resized);
+                    const res = await fetch('./auth/login', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code})
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success' || data.session_string) {
+                        localStorage.setItem('jarvis_session', 'true');
+                        localStorage.setItem('session_id', Date.now().toString()); // ID único para memória
+                        setIsAuth(true);
+                    } else {
+                        alert("Código inválido");
                     }
-                }, 200);
+                }
+                setLoading(false);
             };
 
-            // --- RENDERIZAÇÃO: TELA DE LOGIN ---
-            if (!isAuth) return (
-                <>
-                    <FireBackground />
-                    <div className="flex items-center justify-center h-screen px-6">
-                        <div className="glass-panel w-full max-w-sm p-8 rounded-3xl animate-fade-in text-center">
-                            <div className="w-16 h-16 bg-jarvis/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-jarvis/50 animate-pulse-slow">
-                                <span className="text-2xl">🔥</span>
-                            </div>
-                            <h1 className="text-3xl font-bold mb-2 tracking-tighter">J.A.R.V.I.S.</h1>
-                            <p className="text-gray-400 text-sm mb-8">Protocolo de Acesso Seguro</p>
+            // --- CAMERA ---
+            useEffect(() => {
+                if (showCam && videoRef.current) {
+                    const startCam = async () => {
+                        await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
+                        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                        videoRef.current.srcObject = s;
+                        
+                        // Loop detecção simples
+                        setInterval(async () => {
+                            if(!videoRef.current) return;
+                            const det = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions());
+                            // Aqui desenharia no canvas, simplificado para manter o código limpo
+                        }, 500);
+                    }
+                    startCam();
+                }
+            }, [showCam]);
 
-                            <div className="space-y-4">
-                                {step === 1 ? (
-                                    <input 
-                                        className="w-full bg-black/40 border border-white/10 p-4 rounded-xl text-center text-white outline-none focus:border-jarvis transition-colors"
-                                        placeholder="+5511999999999"
-                                        value={phone} onChange={e => setPhone(e.target.value)}
-                                    />
-                                ) : (
-                                    <input 
-                                        className="w-full bg-black/40 border border-white/10 p-4 rounded-xl text-center text-white outline-none focus:border-jarvis transition-colors tracking-widest text-xl"
-                                        placeholder="12345"
-                                        type="number"
-                                        value={code} onChange={e => setCode(e.target.value)}
-                                    />
-                                )}
-                                
-                                <button 
-                                    onClick={handleLogin}
-                                    disabled={loading}
-                                    className="w-full bg-jarvis hover:bg-orange-700 text-white font-bold p-4 rounded-xl transition-all active:scale-95 shadow-lg shadow-orange-900/30"
-                                >
-                                    {loading ? 'Processando...' : (step === 1 ? 'Iniciar Conexão' : 'Autenticar')}
-                                </button>
-                            </div>
-                        </div>
+            // --- RENDER TELA LOGIN ---
+            if (!isAuth) return (
+                <div className="flex flex-col items-center justify-center h-full px-6 text-white text-center">
+                    <div className="mb-8 p-6 rounded-full border border-orange-500/30 bg-orange-500/10 shadow-[0_0_30px_rgba(234,88,12,0.3)]">
+                        <svg className="w-12 h-12 text-orange-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
                     </div>
-                </>
+                    <h1 className="text-3xl font-bold mb-2 tracking-widest">JARVIS SYSTEM</h1>
+                    <p className="text-gray-400 mb-8 text-sm">Autenticação segura necessária</p>
+                    
+                    <div className="w-full max-w-xs space-y-4">
+                        {step === 1 ? (
+                            <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+55..." className="w-full p-4 rounded-xl glass-input text-white outline-none focus:border-orange-500 transition-all text-center"/>
+                        ) : (
+                            <input value={code} onChange={e=>setCode(e.target.value)} placeholder="00000" className="w-full p-4 rounded-xl glass-input text-white outline-none focus:border-orange-500 transition-all text-center tracking-[0.5em]"/>
+                        )}
+                        <button onClick={doLogin} disabled={loading} className="w-full py-4 bg-orange-600 hover:bg-orange-500 rounded-xl font-bold shadow-lg shadow-orange-900/50 transition-all active:scale-95">
+                            {loading ? 'PROCESSANDO...' : (step === 1 ? 'ENVIAR CÓDIGO' : 'ACESSAR SISTEMA')}
+                        </button>
+                    </div>
+                </div>
             );
 
-            // --- RENDERIZAÇÃO: CHAT (APP) ---
+            // --- RENDER CHAT ---
             return (
-                <div className="flex flex-col h-screen relative">
-                    <FireBackground />
-                    
-                    {/* Header */}
-                    <header className="glass-panel p-4 flex justify-between items-center z-20 sticky top-0">
+                <div className="flex flex-col h-full text-white">
+                    {/* Header Premium */}
+                    <header className="px-6 py-4 flex justify-between items-center glass z-20">
                         <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                            <h1 className="font-bold tracking-widest text-lg">JARVIS.AI</h1>
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_#22c55e]"></div>
+                            <span className="font-bold tracking-widest text-sm">JARVIS V3</span>
                         </div>
-                        <div className="flex gap-3">
-                            <button onClick={() => {localStorage.clear(); window.location.reload()}} className="text-xs text-gray-500 border border-white/10 px-3 py-1 rounded-full">Sair</button>
-                            <button onClick={toggleCamera} className={`p-2 rounded-full ${cameraOpen ? 'bg-red-600' : 'bg-white/10'}`}>📷</button>
+                        <div className="flex gap-4">
+                            <button onClick={()=>setShowCam(!showCam)} className="text-gray-300 hover:text-white transition">📷</button>
+                            <button onClick={()=>{localStorage.clear(); window.location.reload()}} className="text-xs text-red-400 border border-red-900 px-2 py-1 rounded">SAIR</button>
                         </div>
                     </header>
 
                     {/* Camera Overlay */}
-                    {cameraOpen && (
-                        <div className="fixed inset-0 z-30 bg-black flex items-center justify-center">
-                            <video ref={videoRef} autoPlay muted playsInline onPlay={handleVideoPlay} className="w-full h-full object-cover"></video>
-                            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full"></canvas>
-                            <button onClick={() => setCameraOpen(false)} className="absolute top-6 right-6 z-40 bg-red-600 p-3 rounded-full shadow-lg font-bold">FECHAR X</button>
+                    {showCam && (
+                        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+                            <video ref={videoRef} autoPlay muted playsInline className="flex-1 object-cover"></video>
+                            <button onClick={()=>setShowCam(false)} className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-red-600 px-8 py-3 rounded-full font-bold shadow-xl">FECHAR CÂMERA</button>
                         </div>
                     )}
 
-                    {/* Chat Body */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-32 no-scroll">
+                    {/* Chat Area */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6 chat-container hide-scroll z-10">
                         {messages.map((m, i) => (
-                            <div key={i} className={`flex ${m.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[85%] p-4 rounded-2xl shadow-md text-sm md:text-base leading-relaxed ${
-                                    m.type === 'user' 
-                                    ? 'bg-jarvis text-white rounded-tr-none' 
-                                    : 'glass-panel text-gray-200 rounded-tl-none border-l-2 border-jarvis'
+                            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] p-4 rounded-2xl backdrop-blur-md shadow-lg ${
+                                    m.role === 'user' 
+                                    ? 'bg-orange-600 text-white rounded-br-none' 
+                                    : 'bg-zinc-900/80 border border-white/10 text-gray-100 rounded-bl-none'
                                 }`}>
-                                    {m.text}
+                                    <p className="text-sm leading-relaxed">{m.text}</p>
                                 </div>
                             </div>
                         ))}
-                        <div ref={msgEndRef} />
+                        <div ref={chatEndRef} />
                     </div>
 
-                    {/* Input Area (Elevada) */}
-                    <div className="input-area z-20 px-4 pb-6">
-                        <div className="glass-panel p-2 rounded-3xl flex items-center gap-2 shadow-2xl">
+                    {/* Input Fixo Elevado */}
+                    <div className="absolute bottom-0 w-full p-4 pb-6 z-20 bg-gradient-to-t from-black via-black to-transparent">
+                        <div className="max-w-md mx-auto flex gap-2 items-center glass p-2 rounded-2xl">
                             <button 
-                                onClick={toggleMic}
-                                className={`p-4 rounded-full transition-all ${listening ? 'bg-red-600 animate-pulse' : 'bg-white/5 text-gray-400'}`}
+                                onClick={toggleMic} 
+                                className={`p-3 rounded-xl transition-all ${listening ? 'mic-active text-white' : 'text-gray-400 hover:text-white'}`}
                             >
-                                🎙️
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
                             </button>
                             
                             <input 
                                 value={input}
                                 onChange={e => setInput(e.target.value)}
-                                onKeyPress={e => e.key === 'Enter' && sendMessage()}
-                                placeholder="Comando ou pergunta..."
-                                className="flex-1 bg-transparent text-white outline-none px-2 placeholder-gray-500"
+                                onKeyDown={e => e.key === 'Enter' && handleSend()}
+                                placeholder="Digite comando ou fale..."
+                                className="flex-1 bg-transparent text-white outline-none placeholder-gray-500 text-sm"
                             />
                             
-                            <button 
-                                onClick={() => sendMessage()}
-                                className="bg-jarvis p-4 rounded-full text-white shadow-lg active:scale-90 transition-transform"
-                            >
-                                ➤
+                            <button onClick={() => handleSend()} className="p-3 bg-orange-600 rounded-xl text-white shadow-lg active:scale-90 transition-transform">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                             </button>
                         </div>
                     </div>
@@ -336,7 +285,8 @@
             );
         }
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
