@@ -3,5 +3,4 @@ flask-cors
 telethon
 google-genai
 elevenlabs
-gunicorn
 werkzeug
