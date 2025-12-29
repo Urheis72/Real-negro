@@ -1,157 +1,248 @@
-import asyncio
 import os
+import asyncio
+import logging
 import threading
-import base64
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from telethon import TelegramClient, events, errors
+from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from google import genai
-from elevenlabs.client import ElevenLabs
+from telethon.errors import (
+    SessionPasswordNeededError, 
+    PhoneCodeInvalidError, 
+    PhoneNumberInvalidError,
+    FloodWaitError
+)
+import google.generativeai as genai
 
-# ================= CONFIGURAÇÕES =================
+# --- 1. CONFIGURATION & LOGGING ---
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Load Environment Variables
+API_ID = os.environ.get("API_ID", "34303434")  # Replace with real ID if not in env
+API_HASH = os.environ.get("API_HASH", "5d521f53f9721a6376586a014b51173d")
+# Target Chat ID where Jarvis/Bot is located (or group)
+TARGET_CHAT = int(os.environ.get("TARGET_CHAT", "-1002421438612")) 
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyA9a8QscXbFVLcVn6slY5ddmCHbpmQ5oFY")
+SESSION_STRING = os.environ.get('SESSION_STRING', '')
+
+# Initialize Gemini
+try:
+    genai.configure(api_key=GEMINI_KEY)
+    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+except Exception as e:
+    logger.error(f"Failed to init Gemini: {e}")
+
 app = Flask(__name__, static_folder='public')
 CORS(app)
 
-# Chaves de API
-API_ID = 34303434
-API_HASH = '5d521f53f9721a6376586a014b51173d'
-TARGET_CHAT = -1002421438612
-GEMINI_KEY = "AIzaSyDByO6eYeg8vmb8v9HZ121RQnwdGkBLatk"
-ELEVEN_KEY = "80f20c0648bd28e0f7c7c77c6d41551f5e5e03109f94f40a9bf0176a981e5b8f"
+# --- 2. TELEGRAM MANAGER (The Core Logic) ---
+class TelegramManager:
+    """
+    Singleton class to manage the Telethon client in a separate thread.
+    This prevents Flask's synchronous nature from blocking the Asyncio loop.
+    """
+    _instance = None
 
-# Clientes
-client_genai = genai.Client(api_key=GEMINI_KEY)
-client_eleven = ElevenLabs(api_key=ELEVEN_KEY)
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(TelegramManager, cls).__new__(cls)
+            cls._instance.loop = asyncio.new_event_loop()
+            cls._instance.client = None
+            cls._instance.phone = None
+            cls._instance.phone_code_hash = None
+            cls._instance.is_connected = False
+        return cls._instance
 
-# Memória da IA (Dicionário simples por sessão)
-sessions_memory = {}
+    def start_background_loop(self):
+        """Starts the asyncio loop in a separate daemon thread."""
+        def run():
+            asyncio.set_event_loop(self.loop)
+            self.loop.run_forever()
+        
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        logger.info("Background AsyncIO Loop Started")
 
-# Configuração do Telegram e Loop de Eventos
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+    def init_client(self):
+        """Initializes the Telethon Client."""
+        session = StringSession(SESSION_STRING)
+        self.client = TelegramClient(session, API_ID, API_HASH, loop=self.loop)
+        
+        # Add event handlers
+        self.client.add_event_handler(self.incoming_message_handler, events.NewMessage())
 
-SESSION_STRING = os.environ.get('SESSION_STRING', '')
-client_tg = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=loop)
+        # Connect immediately
+        future = asyncio.run_coroutine_threadsafe(self.client.connect(), self.loop)
+        future.add_done_callback(lambda f: self._check_connection())
 
-# Variáveis temporárias para login
-auth_data = {"hash": None, "phone": None}
+    def _check_connection(self):
+        """Callback to check if we are authorized."""
+        async def check():
+            if await self.client.is_user_authorized():
+                self.is_connected = True
+                me = await self.client.get_me()
+                logger.info(f"Telegram Connected as: {me.first_name}")
+                # Print session string for persistence if needed
+                print(f"\n--- SESSION STRING (Save to Env Var) ---\n{self.client.session.save()}\n----------------------------------------\n")
+            else:
+                logger.info("Client connected but not authorized. Waiting for login.")
+        
+        asyncio.run_coroutine_threadsafe(check(), self.loop)
 
-# ================= FUNÇÕES DE IA E VOZ =================
+    async def incoming_message_handler(self, event):
+        """Listens for incoming messages (Logic for Jarvis replies can go here)."""
+        # Note: For a simple architecture, we are logging. 
+        # To bridge back to HTTP, we would need a Future/Queue system.
+        sender = await event.get_sender()
+        logger.info(f"New Message from {sender.id}: {event.text}")
 
-def get_ai_response(session_id, text):
-    """Gera resposta com o Gemini mantendo histórico"""
-    if session_id not in sessions_memory:
-        sessions_memory[session_id] = []
+    # --- Auth Methods ---
+
+    async def _send_code(self, phone):
+        self.phone = phone
+        try:
+            sent = await self.client.send_code_request(phone)
+            self.phone_code_hash = sent.phone_code_hash
+            return {"status": "sent", "message": "Code sent via Telegram"}
+        except FloodWaitError as e:
+            return {"status": "error", "error": f"Flood wait: {e.seconds} seconds"}
+        except PhoneNumberInvalidError:
+            return {"status": "error", "error": "Invalid phone number"}
+        except Exception as e:
+            logger.error(f"Send Code Error: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def _login(self, code, password=None):
+        try:
+            if not self.phone or not self.phone_code_hash:
+                return {"status": "error", "error": "Request code first"}
+
+            await self.client.sign_in(
+                self.phone, 
+                code, 
+                phone_code_hash=self.phone_code_hash
+            )
+            
+            self.is_connected = True
+            new_session = self.client.session.save()
+            return {"status": "success", "session_string": new_session}
+
+        except SessionPasswordNeededError:
+            # If 2FA is enabled (not implemented in this simplified UI, but handled here)
+            return {"status": "error", "error": "2FA required (Password not supported in this UI version)"}
+        except PhoneCodeInvalidError:
+            return {"status": "error", "error": "Invalid code"}
+        except Exception as e:
+            logger.error(f"Login Error: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def _send_message(self, chat_id, text):
+        if not self.is_connected:
+            raise Exception("Telegram not connected")
+        await self.client.send_message(chat_id, text)
+
+    # --- Thread-Safe Public Wrappers ---
     
-    # Adiciona pergunta ao histórico
-    sessions_memory[session_id].append({"role": "user", "parts": [text]})
-    
-    try:
-        response = client_genai.models.generate_content(
-            model="gemini-2.0-flash-exp",
-            contents=sessions_memory[session_id]
-        )
-        answer = response.text
-        # Adiciona resposta da IA ao histórico
-        sessions_memory[session_id].append({"role": "model", "parts": [answer]})
-        return answer
-    except Exception as e:
-        return f"Erro na IA: {str(e)}"
+    def request_code(self, phone):
+        future = asyncio.run_coroutine_threadsafe(self._send_code(phone), self.loop)
+        return future.result()
 
-def text_to_speech_b64(text):
-    """Converte texto em áudio Base64 via ElevenLabs"""
-    try:
-        audio_gen = client_eleven.text_to_speech.convert(
-            text=text[:300], # Limite para rapidez
-            voice_id="pNInz6obpgDQGcFmaJgB", # Voz Adam
-            model_id="eleven_multilingual_v2",
-            output_format="mp3_44100_128"
-        )
-        audio_bytes = b"".join(audio_gen)
-        return base64.b64encode(audio_bytes).decode('utf-8')
-    except:
-        return None
+    def login(self, code):
+        future = asyncio.run_coroutine_threadsafe(self._login(code), self.loop)
+        return future.result()
 
-# ================= ROTAS DO SERVIDOR =================
+    def send_msg(self, text, is_command=False):
+        if is_command:
+            # Send to Telegram Group
+            asyncio.run_coroutine_threadsafe(self._send_message(TARGET_CHAT, text), self.loop)
+        else:
+            # Send to Gemini
+            pass # Handled in Flask route
+
+# Instantiate the Manager
+tg_manager = TelegramManager()
+
+# --- 3. FLASK ROUTES ---
 
 @app.route('/')
-def serve_index():
+def index():
     return send_from_directory('public', 'index.html')
+
+@app.route('/auth/send_code', methods=['POST'])
+def auth_send_code():
+    """Step 1: Receive phone, trigger Telegram code"""
+    data = request.json
+    phone = data.get('phone')
+    
+    if not phone:
+        return jsonify({"status": "error", "error": "Phone required"}), 400
+
+    result = tg_manager.request_code(phone)
+    if result['status'] == 'error':
+        return jsonify(result), 400
+    
+    return jsonify(result)
+
+@app.route('/auth/login', methods=['POST'])
+def auth_login():
+    """Step 2: Receive code, complete login"""
+    data = request.json
+    code = data.get('code')
+    
+    if not code:
+        return jsonify({"status": "error", "error": "Code required"}), 400
+
+    result = tg_manager.login(code)
+    if result['status'] == 'error':
+        return jsonify(result), 401
+    
+    return jsonify(result)
 
 @app.route('/perguntar', methods=['POST'])
 def perguntar():
+    """Main Chat Endpoint"""
     data = request.json
-    pergunta = data.get('pergunta', '').strip()
-    session_id = data.get('session_id', 'default_user')
+    prompt = data.get('pergunta', '').strip()
 
-    if not pergunta:
-        return jsonify({'resposta': 'Sim?'})
+    if not prompt:
+        return jsonify({'resposta': '...'}), 400
 
-    # LÓGICA DE COMANDO /
-    if pergunta.startswith('/'):
-        # Envia para o Telegram em background
-        asyncio.run_coroutine_threadsafe(client_tg.send_message(TARGET_CHAT, pergunta), loop)
-        res_text = f"Comando '{pergunta}' enviado ao Telegram."
-    else:
-        # Resposta via IA Gemini com memória
-        res_text = get_ai_response(session_id, pergunta)
+    # 1. Check if it's a command (starts with /)
+    if prompt.startswith('/'):
+        try:
+            if not tg_manager.is_connected:
+                return jsonify({'resposta': 'Erro: Telegram desconectado. Faça login novamente.'}), 503
+            
+            tg_manager.send_msg(prompt, is_command=True)
+            return jsonify({'resposta': f'Comando "{prompt}" enviado ao sistema remoto.'})
+        except Exception as e:
+            return jsonify({'resposta': f'Erro ao enviar comando: {str(e)}'}), 500
 
-    # Gera áudio da resposta
-    audio_data = text_to_speech_b64(res_text)
+    # 2. Otherwise, use Gemini IA
+    try:
+        response = model.generate_content(
+            f"Você é J.A.R.V.I.S. Responda de forma curta, técnica e eficiente. Usuário diz: {prompt}"
+        )
+        return jsonify({'resposta': response.text})
+    except Exception as e:
+        logger.error(f"Gemini Error: {e}")
+        return jsonify({'resposta': 'Erro no processamento da IA.'}), 500
 
-    return jsonify({
-        'resposta': res_text,
-        'audio': audio_data
-    })
+# --- 4. INITIALIZATION ---
 
-# ================= ROTAS DE AUTENTICAÇÃO =================
-
-@app.route('/auth/send_code', methods=['POST'])
-def send_code():
-    phone = request.json.get('phone', '').strip()
-    # Limpa o número para garantir formato +55...
-    phone = '+' + ''.join(filter(str.isdigit, phone)) if not phone.startswith('+') else phone
+def start_app():
+    # Start Telegram Loop
+    tg_manager.start_background_loop()
+    tg_manager.init_client()
     
-    try:
-        if not client_tg.is_connected():
-            asyncio.run_coroutine_threadsafe(client_tg.connect(), loop).result()
-        
-        print(f"Solicitando código para {phone}...")
-        result = asyncio.run_coroutine_threadsafe(client_tg.send_code_request(phone), loop).result()
-        
-        auth_data["hash"] = result.phone_code_hash
-        auth_data["phone"] = phone
-        return jsonify({'status': 'sent'})
-    except Exception as e:
-        print(f"Erro no envio: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/auth/login', methods=['POST'])
-def login():
-    code = request.json.get('code', '').strip()
-    try:
-        user = asyncio.run_coroutine_threadsafe(
-            client_tg.sign_in(auth_data["phone"], code, phone_code_hash=auth_data["hash"]), 
-            loop
-        ).result()
-        
-        session_str = client_tg.session.save()
-        return jsonify({'status': 'success', 'session_string': session_str})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
-# ================= INICIALIZAÇÃO =================
-
-def run_telegram():
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+    # Start Flask
+    port = int(os.environ.get('PORT', 5000))
+    # Use_reloader=False is crucial when using threads to avoid duplicating the loop
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
-    # Inicia o Telegram numa thread separada
-    threading.Thread(target=run_telegram, daemon=True).start()
-    
-    # Porta do Render
-    port = int(os.getenv('PORT', 5000))
-    # debug=False é obrigatório para não dar erro de loop no Render
-    app.run(host='0.0.0.0', port=port, debug=False)
+    start_app()
