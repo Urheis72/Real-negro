@@ -1,6 +1,4 @@
-Flask
+flask
 flask-cors
 telethon
-google-genai
-elevenlabs
-werkzeug
+google-generativeai
