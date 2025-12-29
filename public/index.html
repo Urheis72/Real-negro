@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JARVIS - Intelligence</title>
+    <title>Jarvis Core OS</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -11,230 +11,262 @@
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
-        body { background: #0f1113; color: #e2e8f0; font-family: 'Inter', sans-serif; }
-        .jarvis-gradient { background: linear-gradient(135deg, #1a1c1e 0%, #0f1113 100%); }
-        .accent-border { border-color: rgba(249, 115, 22, 0.3); }
-        .camera-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 100; background: #000; }
-        #webcam { width: 100%; height: 100%; object-fit: cover; }
-        #overlay-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;500&display=swap');
+        :root { --jarvis-orange: #f97316; --jarvis-bg: #0a0a0b; }
+        body { background: var(--jarvis-bg); color: #e2e8f0; font-family: 'JetBrains+Mono', monospace; overflow: hidden; }
+        .glass { background: rgba(23, 23, 26, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(249, 115, 22, 0.1); }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
 
-        // Banco de Dados para Galeria
-        const db = new Dexie("JarvisVision");
-        db.version(1).stores({ photos: "++id, image, timestamp, faceId" });
+        // --- DATABASE SERVICE (IndexedDB) ---
+        const db = new Dexie("JarvisDatabase");
+        db.version(1).stores({ photos: "++id, image, timestamp" });
 
-        function App() {
+        const App = () => {
             const [isAuth, setIsAuth] = useState(localStorage.getItem('jarvis_auth') === 'true');
-            const [view, setView] = useState('chat'); // chat, camera, gallery
-            const [messages, setMessages] = useState([{ t: 'a', m: 'Sistemas online. Como posso ajudar?' }]);
+            const [view, setView] = useState('chat'); // chat | camera | gallery
+            const [messages, setMessages] = useState([{ t: 'a', m: 'Sistemas inicializados. Aguardando comandos.' }]);
             const [input, setInput] = useState('');
             const [isListening, setIsListening] = useState(false);
-            const [facingMode, setFacingMode] = useState('environment'); // environment = traseira
+            const [facingMode, setFacingMode] = useState('environment');
             const [gallery, setGallery] = useState([]);
 
-            const videoRef = useRef();
-            const canvasRef = useRef();
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
             const recognitionRef = useRef(null);
-            const trackingTimers = useRef({}); // Para o delay de 2 segundos
+            const faceDetectionId = useRef(null);
+            const trackingMap = useRef(new Map()); // ID -> startTime
 
-            useEffect(() => {
-                loadGallery();
-                if (view === 'camera') startCamera();
-            }, [view, facingMode]);
+            // --- CHAT LOGIC ---
+            const sendMessage = useCallback(async (text) => {
+                const msg = text || input;
+                if (!msg.trim()) return;
 
-            const loadGallery = async () => {
-                const photos = await db.photos.orderBy('timestamp').reverse().toArray();
-                setGallery(photos);
-            };
-
-            // --- Lógica de Chat e Voz ---
-            const handleSend = async (textOverride) => {
-                const val = textOverride || input;
-                if (!val.trim()) return;
-                setMessages(prev => [...prev, { t: 'u', m: val }]);
+                setMessages(prev => [...prev, { t: 'u', m: msg }]);
                 setInput('');
 
-                const res = await fetch('./perguntar', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ pergunta: val })
-                });
-                const data = await res.json();
-                setMessages(prev => [...prev, { t: 'a', m: data.resposta }]);
-            };
+                try {
+                    const res = await fetch('./perguntar', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ pergunta: msg })
+                    });
+                    const data = await res.json();
+                    setMessages(prev => [...prev, { t: 'a', m: data.resposta }]);
+                } catch (e) {
+                    setMessages(prev => [...prev, { t: 'a', m: 'Erro de conexão com o servidor.' }]);
+                }
+            }, [input]);
 
-            const toggleVoice = () => {
+            // --- SPEECH LOGIC ---
+            const toggleSpeech = () => {
                 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-                if (!Speech) return alert("Navegador incompatível com voz.");
-                
+                if (!Speech) return alert("Hardware de voz não detectado.");
+
                 if (isListening) {
-                    recognitionRef.current.stop();
+                    recognitionRef.current?.stop();
                     return;
                 }
 
                 const rec = new Speech();
                 rec.lang = 'pt-BR';
+                rec.continuous = false;
+                rec.interimResults = false;
+
                 rec.onstart = () => setIsListening(true);
                 rec.onresult = (e) => {
-                    const txt = e.results[0][0].transcript;
-                    setInput(txt);
-                    setTimeout(() => { rec.stop(); handleSend(txt); }, 2000);
+                    const text = e.results[0][0].transcript;
+                    setInput(text);
+                    setTimeout(() => sendMessage(text), 1000);
                 };
                 rec.onend = () => setIsListening(false);
+                
                 recognitionRef.current = rec;
                 rec.start();
             };
 
-            // --- Lógica de Visão (Câmera + Face Detection) ---
-            const startCamera = async () => {
-                await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: facingMode } 
-                });
-                videoRef.current.srcObject = stream;
+            // --- CAMERA & FACE DETECTION LOGIC ---
+            const stopCamera = () => {
+                if (faceDetectionId.current) clearInterval(faceDetectionId.current);
+                if (videoRef.current?.srcObject) {
+                    videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+                }
             };
 
-            const onVideoPlay = () => {
-                const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
+            const startVision = async () => {
+                try {
+                    await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: facingMode, width: { ideal: 1280 }, height: { ideal: 720 } } 
+                    });
+                    if (videoRef.current) videoRef.current.srcObject = stream;
+                } catch (e) {
+                    alert("Erro ao acessar câmera periférica.");
+                    setView('chat');
+                }
+            };
+
+            const runDetection = () => {
+                if (!videoRef.current || !canvasRef.current) return;
+                
+                const displaySize = { width: videoRef.current.offsetWidth, height: videoRef.current.offsetHeight };
                 faceapi.matchDimensions(canvasRef.current, displaySize);
 
-                const capturedFaces = new Set(); // Evita duplicatas na mesma sessão
-
-                setInterval(async () => {
-                    if (!videoRef.current || view !== 'camera') return;
-
+                faceDetectionId.current = setInterval(async () => {
                     const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions());
                     const resized = faceapi.resizeResults(detections, displaySize);
                     
                     const ctx = canvasRef.current.getContext('2d');
                     ctx.clearRect(0, 0, displaySize.width, displaySize.height);
+                    
+                    const currentIds = new Set();
 
                     resized.forEach((det, i) => {
                         const id = i + 1;
-                        const box = det.box;
+                        currentIds.add(id);
+                        const { x, y, width, height } = det.box;
 
-                        // Desenhar UI Jarvis
+                        // UI Bounding Box
                         ctx.strokeStyle = '#f97316';
                         ctx.lineWidth = 2;
-                        ctx.strokeRect(box.x, box.y, box.width, box.height);
+                        ctx.strokeRect(x, y, width, height);
                         ctx.fillStyle = '#f97316';
-                        ctx.fillText(`FACE #${id}`, box.x, box.y - 10);
+                        ctx.fillText(`ID: ${id}`, x, y - 5);
 
-                        // Tracking de 2 segundos
-                        if (!capturedFaces.has(id)) {
-                            if (!trackingTimers.current[id]) {
-                                trackingTimers.current[id] = Date.now();
-                            } else if (Date.now() - trackingTimers.current[id] > 2000) {
-                                captureFace(id, box);
-                                capturedFaces.add(id);
-                                delete trackingTimers.current[id];
+                        // Capture Logic (2 seconds)
+                        if (!trackingMap.current.has(id)) {
+                            trackingMap.current.set(id, { start: Date.now(), captured: false });
+                        } else {
+                            const data = trackingMap.current.get(id);
+                            if (!data.captured && (Date.now() - data.start) > 2000) {
+                                captureSnapshot(det.box);
+                                data.captured = true;
                             }
                         }
                     });
+
+                    // Cleanup trackingMap for IDs no longer present
+                    for (const key of trackingMap.current.keys()) {
+                        if (!currentIds.has(key)) trackingMap.current.delete(key);
+                    }
                 }, 200);
             };
 
-            const captureFace = async (id, box) => {
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = box.width;
-                tempCanvas.height = box.height;
-                tempCanvas.getContext('2d').drawImage(
-                    videoRef.current, 
-                    box.x, box.y, box.width, box.height, 
-                    0, 0, box.width, box.height
-                );
+            const captureSnapshot = async (box) => {
+                const offscreen = document.createElement('canvas');
+                const scale = videoRef.current.videoWidth / videoRef.current.offsetWidth;
+                offscreen.width = box.width * scale;
+                offscreen.height = box.height * scale;
                 
-                const imgData = tempCanvas.toDataURL('image/jpeg');
-                await db.photos.add({ image: imgData, timestamp: Date.now(), faceId: id });
-                loadGallery();
+                const ctx = offscreen.getContext('2d');
+                ctx.drawImage(videoRef.current, 
+                    box.x * scale, box.y * scale, box.width * scale, box.height * scale,
+                    0, 0, offscreen.width, offscreen.height
+                );
+
+                const blob = offscreen.toDataURL('image/jpeg', 0.8);
+                await db.photos.add({ image: blob, timestamp: Date.now() });
+                refreshGallery();
             };
 
-            // --- Componentes de Tela ---
+            const refreshGallery = async () => {
+                const all = await db.photos.orderBy('timestamp').reverse().toArray();
+                setGallery(all);
+            };
+
+            useEffect(() => {
+                if (view === 'camera') {
+                    startVision();
+                } else {
+                    stopCamera();
+                }
+                if (view === 'gallery') refreshGallery();
+            }, [view, facingMode]);
+
+            // --- UI RENDER ---
             if (!isAuth) return (
-                <div className="flex flex-col items-center justify-center h-screen jarvis-gradient">
-                    <div className="p-8 glass bg-zinc-900/50 rounded-3xl border border-zinc-800 text-center">
-                        <h1 className="text-orange-500 font-bold text-2xl mb-6">PROTOCOLO JARVIS</h1>
-                        <button onClick={() => {localStorage.setItem('jarvis_auth','true'); setIsAuth(true)}} 
-                                className="bg-orange-600 px-8 py-3 rounded-xl font-bold">AUTENTICAR</button>
+                <div className="h-screen flex items-center justify-center p-6">
+                    <div className="glass p-8 rounded-3xl w-full max-w-sm text-center">
+                        <div className="text-orange-500 text-4xl mb-4 font-bold tracking-tighter">JARVIS</div>
+                        <p className="text-zinc-500 text-sm mb-8">Protocolo de segurança ativo. Requer autenticação.</p>
+                        <button onClick={() => {localStorage.setItem('jarvis_auth', 'true'); setIsAuth(true)}} 
+                                className="w-full bg-orange-600 py-4 rounded-2xl font-bold hover:bg-orange-500 transition-all">
+                            INICIALIZAR SISTEMA
+                        </button>
                     </div>
                 </div>
             );
 
             return (
-                <div className="flex flex-col h-screen max-w-md mx-auto jarvis-gradient">
-                    {/* Header Minimalista */}
-                    <header className="p-5 flex justify-between items-center border-b border-zinc-800">
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></div>
-                            <span className="text-sm font-semibold tracking-tighter text-zinc-400">JARVIS S-01</span>
-                        </div>
-                        <div className="flex gap-4">
-                            <button onClick={() => setView('gallery')}>🖼️</button>
-                            <button onClick={() => setView('camera')}>📷</button>
+                <div className="h-screen flex flex-col max-w-lg mx-auto border-x border-zinc-900">
+                    {/* Header */}
+                    <header className="p-4 glass flex justify-between items-center z-10">
+                        <div className="text-orange-500 font-bold text-lg">JARVIS CORE</div>
+                        <div className="flex gap-3">
+                            <button onClick={() => setView('gallery')} className="text-zinc-400">🖼️</button>
+                            <button onClick={() => setView('camera')} className="text-zinc-400">📷</button>
+                            <button onClick={() => setView('chat')} className="text-zinc-400">💬</button>
                         </div>
                     </header>
 
-                    {/* Área de Chat */}
+                    {/* Chat View */}
                     {view === 'chat' && (
-                        <>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
                                 {messages.map((m, i) => (
                                     <div key={i} className={`flex ${m.t === 'u' ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`p-4 rounded-2xl text-sm max-w-[85%] ${m.t === 'u' ? 'bg-orange-600 text-white' : 'bg-zinc-800/50 border border-zinc-700'}`}>
+                                        <div className={`max-w-[85%] p-4 rounded-2xl text-sm ${m.t === 'u' ? 'bg-orange-600' : 'glass text-zinc-300'}`}>
                                             {m.m}
                                         </div>
                                     </div>
                                 ))}
                             </div>
-                            <footer className="p-4 bg-zinc-900/80 backdrop-blur-md border-t border-zinc-800">
-                                <div className="flex gap-2 items-center">
-                                    <button onClick={toggleVoice} className={`p-4 rounded-full ${isListening ? 'bg-red-500' : 'bg-zinc-800'}`}>🎙️</button>
-                                    <input value={input} onChange={e => setInput(e.target.value)} 
-                                           className="flex-1 bg-transparent border border-zinc-700 rounded-2xl p-3 outline-none" placeholder="Comando..." />
-                                    <button onClick={() => handleSend()} className="bg-orange-600 p-4 rounded-xl">➤</button>
-                                </div>
-                            </footer>
-                        </>
-                    )}
-
-                    {/* Tela de Câmera Fullscreen */}
-                    {view === 'camera' && (
-                        <div className="camera-overlay">
-                            <video ref={videoRef} onPlay={onVideoPlay} autoPlay muted playsInline id="webcam"></video>
-                            <canvas ref={canvasRef} id="overlay-canvas"></canvas>
-                            <div className="absolute bottom-10 w-full flex justify-center gap-10">
-                                <button onClick={() => setFacingMode(f => f === 'user' ? 'environment' : 'user')} 
-                                        className="bg-white/20 p-4 rounded-full backdrop-blur-md">🔄</button>
-                                <button onClick={() => setView('chat')} 
-                                        className="bg-red-600 p-4 rounded-full text-white">✖</button>
+                            <div className="p-4 glass m-4 rounded-3xl flex items-center gap-3">
+                                <button onClick={toggleSpeech} className={`p-2 rounded-full ${isListening ? 'text-red-500 animate-pulse' : 'text-orange-500'}`}>🎙️</button>
+                                <input 
+                                    className="bg-transparent flex-1 outline-none text-sm" 
+                                    placeholder="Transmitir comando..."
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                                />
+                                <button onClick={() => sendMessage()} className="text-orange-500">➤</button>
                             </div>
                         </div>
                     )}
 
-                    {/* Galeria */}
-                    {view === 'gallery' && (
-                        <div className="flex-1 p-4 overflow-y-auto">
-                            <button onClick={() => setView('chat')} className="mb-4 text-orange-500">← Voltar</button>
-                            <div className="grid grid-cols-3 gap-2">
-                                {gallery.map(p => (
-                                    <div key={p.id} className="aspect-square bg-zinc-800 rounded-lg overflow-hidden border border-zinc-700">
-                                        <img src={p.image} className="w-full h-full object-cover" />
-                                    </div>
-                                ))}
+                    {/* Camera View */}
+                    {view === 'camera' && (
+                        <div className="flex-1 relative bg-black">
+                            <video ref={videoRef} onPlay={runDetection} autoPlay muted playsInline className="w-full h-full object-cover" />
+                            <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
+                            <div className="absolute bottom-10 left-0 w-full flex justify-center gap-6">
+                                <button onClick={() => setFacingMode(p => p === 'user' ? 'environment' : 'user')} className="glass p-4 rounded-full">🔄</button>
+                                <button onClick={() => setView('chat')} className="bg-red-900 p-4 rounded-full">✖</button>
                             </div>
-                            {gallery.length === 0 && <p className="text-center text-zinc-500 mt-20">Nenhum registro visual.</p>}
+                        </div>
+                    )}
+
+                    {/* Gallery View */}
+                    {view === 'gallery' && (
+                        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-3 gap-2 scrollbar-hide">
+                            {gallery.map(img => (
+                                <div key={img.id} className="aspect-square glass rounded-lg overflow-hidden relative">
+                                    <img src={img.image} className="w-full h-full object-cover" />
+                                </div>
+                            ))}
+                            {gallery.length === 0 && <div className="col-span-3 text-center text-zinc-600 mt-20">Banco de dados visual vazio.</div>}
                         </div>
                     )}
                 </div>
             );
-        }
+        };
 
         ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
