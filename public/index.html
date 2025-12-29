@@ -3,126 +3,239 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jarvis Pro</title>
+    <title>JARVIS - Intelligence</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
     <style>
-        body { background: #000; color: white; font-family: sans-serif; }
-        .cam-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; background: #000; display: none; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        canvas { position: absolute; top: 0; left: 0; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+        body { background: #0f1113; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        .jarvis-gradient { background: linear-gradient(135deg, #1a1c1e 0%, #0f1113 100%); }
+        .accent-border { border-color: rgba(249, 115, 22, 0.3); }
+        .camera-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 100; background: #000; }
+        #webcam { width: 100%; height: 100%; object-fit: cover; }
+        #overlay-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="root"></div>
+
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // Banco de Dados para Galeria
+        const db = new Dexie("JarvisVision");
+        db.version(1).stores({ photos: "++id, image, timestamp, faceId" });
+
         function App() {
-            const [isAuth, setIsAuth] = useState(localStorage.getItem('jarvis_logged') === 'true');
-            const [msg, setMsg] = useState([]);
+            const [isAuth, setIsAuth] = useState(localStorage.getItem('jarvis_auth') === 'true');
+            const [view, setView] = useState('chat'); // chat, camera, gallery
+            const [messages, setMessages] = useState([{ t: 'a', m: 'Sistemas online. Como posso ajudar?' }]);
             const [input, setInput] = useState('');
-            const [listening, setListening] = useState(false);
-            const [showCam, setShowCam] = useState(false);
-            const videoRef = useRef(); const canvasRef = useRef();
-            const silenceTimer = useRef(null);
+            const [isListening, setIsListening] = useState(false);
+            const [facingMode, setFacingMode] = useState('environment'); // environment = traseira
+            const [gallery, setGallery] = useState([]);
 
-            // --- FUNÇÃO DE VOZ (Speech-to-Text) ---
-            const toggleMic = () => {
-                const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-                if (!Speech) return alert("Navegador incompatível");
-                
-                const rec = new Speech();
-                rec.lang = 'pt-BR';
-                rec.continuous = true;
-                rec.interimResults = true;
+            const videoRef = useRef();
+            const canvasRef = useRef();
+            const recognitionRef = useRef(null);
+            const trackingTimers = useRef({}); // Para o delay de 2 segundos
 
-                rec.onstart = () => setListening(true);
-                rec.onresult = (e) => {
-                    const text = Array.from(e.results).map(r => r[0].transcript).join('');
-                    setInput(text);
-                    if (silenceTimer.current) clearTimeout(silenceTimer.current);
-                    silenceTimer.current = setTimeout(() => { rec.stop(); send(text); }, 3000);
-                };
-                rec.onend = () => setListening(false);
-                rec.start();
+            useEffect(() => {
+                loadGallery();
+                if (view === 'camera') startCamera();
+            }, [view, facingMode]);
+
+            const loadGallery = async () => {
+                const photos = await db.photos.orderBy('timestamp').reverse().toArray();
+                setGallery(photos);
             };
 
-            // --- ENVIO ---
-            const send = async (txt) => {
-                const val = txt || input;
+            // --- Lógica de Chat e Voz ---
+            const handleSend = async (textOverride) => {
+                const val = textOverride || input;
                 if (!val.trim()) return;
-                setMsg(p => [...p, { t: 'u', m: val }]);
+                setMessages(prev => [...prev, { t: 'u', m: val }]);
                 setInput('');
+
                 const res = await fetch('./perguntar', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ pergunta: val })
                 });
                 const data = await res.json();
-                setMsg(p => [...p, { t: 'a', m: data.resposta }]);
+                setMessages(prev => [...prev, { t: 'a', m: data.resposta }]);
             };
 
-            // --- CÂMERA E FACE API ---
-            const openCam = async () => {
-                setShowCam(true);
+            const toggleVoice = () => {
+                const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!Speech) return alert("Navegador incompatível com voz.");
+                
+                if (isListening) {
+                    recognitionRef.current.stop();
+                    return;
+                }
+
+                const rec = new Speech();
+                rec.lang = 'pt-BR';
+                rec.onstart = () => setIsListening(true);
+                rec.onresult = (e) => {
+                    const txt = e.results[0][0].transcript;
+                    setInput(txt);
+                    setTimeout(() => { rec.stop(); handleSend(txt); }, 2000);
+                };
+                rec.onend = () => setIsListening(false);
+                recognitionRef.current = rec;
+                rec.start();
+            };
+
+            // --- Lógica de Visão (Câmera + Face Detection) ---
+            const startCamera = async () => {
                 await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: facingMode } 
+                });
                 videoRef.current.srcObject = stream;
             };
 
-            const onPlay = () => {
+            const onVideoPlay = () => {
                 const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
                 faceapi.matchDimensions(canvasRef.current, displaySize);
+
+                const capturedFaces = new Set(); // Evita duplicatas na mesma sessão
+
                 setInterval(async () => {
+                    if (!videoRef.current || view !== 'camera') return;
+
                     const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions());
                     const resized = faceapi.resizeResults(detections, displaySize);
-                    canvasRef.current.getContext('2d').clearRect(0, 0, displaySize.width, displaySize.height);
-                    faceapi.draw.drawDetections(canvasRef.current, resized);
+                    
+                    const ctx = canvasRef.current.getContext('2d');
+                    ctx.clearRect(0, 0, displaySize.width, displaySize.height);
+
+                    resized.forEach((det, i) => {
+                        const id = i + 1;
+                        const box = det.box;
+
+                        // Desenhar UI Jarvis
+                        ctx.strokeStyle = '#f97316';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(box.x, box.y, box.width, box.height);
+                        ctx.fillStyle = '#f97316';
+                        ctx.fillText(`FACE #${id}`, box.x, box.y - 10);
+
+                        // Tracking de 2 segundos
+                        if (!capturedFaces.has(id)) {
+                            if (!trackingTimers.current[id]) {
+                                trackingTimers.current[id] = Date.now();
+                            } else if (Date.now() - trackingTimers.current[id] > 2000) {
+                                captureFace(id, box);
+                                capturedFaces.add(id);
+                                delete trackingTimers.current[id];
+                            }
+                        }
+                    });
                 }, 200);
             };
 
+            const captureFace = async (id, box) => {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = box.width;
+                tempCanvas.height = box.height;
+                tempCanvas.getContext('2d').drawImage(
+                    videoRef.current, 
+                    box.x, box.y, box.width, box.height, 
+                    0, 0, box.width, box.height
+                );
+                
+                const imgData = tempCanvas.toDataURL('image/jpeg');
+                await db.photos.add({ image: imgData, timestamp: Date.now(), faceId: id });
+                loadGallery();
+            };
+
+            // --- Componentes de Tela ---
             if (!isAuth) return (
-                <div className="flex flex-col items-center justify-center h-screen p-10">
-                    <button onClick={() => {localStorage.setItem('jarvis_logged', 'true'); setIsAuth(true)}} className="bg-orange-600 p-4 rounded-xl font-bold">Entrar no App</button>
+                <div className="flex flex-col items-center justify-center h-screen jarvis-gradient">
+                    <div className="p-8 glass bg-zinc-900/50 rounded-3xl border border-zinc-800 text-center">
+                        <h1 className="text-orange-500 font-bold text-2xl mb-6">PROTOCOLO JARVIS</h1>
+                        <button onClick={() => {localStorage.setItem('jarvis_auth','true'); setIsAuth(true)}} 
+                                className="bg-orange-600 px-8 py-3 rounded-xl font-bold">AUTENTICAR</button>
+                    </div>
                 </div>
             );
 
             return (
-                <div className="flex flex-col h-screen max-w-md mx-auto border-x border-white/10">
-                    <header className="p-4 bg-gray-900 flex justify-between items-center border-b border-white/10">
-                        <h1 className="text-orange-500 font-bold tracking-widest">JARVIS v2</h1>
-                        <button onClick={openCam} className="bg-gray-800 p-2 rounded-lg">📷</button>
+                <div className="flex flex-col h-screen max-w-md mx-auto jarvis-gradient">
+                    {/* Header Minimalista */}
+                    <header className="p-5 flex justify-between items-center border-b border-zinc-800">
+                        <div className="flex items-center gap-2">
+                            <div className="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></div>
+                            <span className="text-sm font-semibold tracking-tighter text-zinc-400">JARVIS S-01</span>
+                        </div>
+                        <div className="flex gap-4">
+                            <button onClick={() => setView('gallery')}>🖼️</button>
+                            <button onClick={() => setView('camera')}>📷</button>
+                        </div>
                     </header>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black">
-                        {msg.map((item, i) => (
-                            <div key={i} className={`flex ${item.t === 'u' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`p-3 rounded-2xl max-w-[85%] ${item.t === 'u' ? 'bg-orange-600' : 'bg-zinc-900 border border-white/5'}`}>
-                                    {item.m}
-                                </div>
+                    {/* Área de Chat */}
+                    {view === 'chat' && (
+                        <>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                {messages.map((m, i) => (
+                                    <div key={i} className={`flex ${m.t === 'u' ? 'justify-end' : 'justify-start'}`}>
+                                        <div className={`p-4 rounded-2xl text-sm max-w-[85%] ${m.t === 'u' ? 'bg-orange-600 text-white' : 'bg-zinc-800/50 border border-zinc-700'}`}>
+                                            {m.m}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
+                            <footer className="p-4 bg-zinc-900/80 backdrop-blur-md border-t border-zinc-800">
+                                <div className="flex gap-2 items-center">
+                                    <button onClick={toggleVoice} className={`p-4 rounded-full ${isListening ? 'bg-red-500' : 'bg-zinc-800'}`}>🎙️</button>
+                                    <input value={input} onChange={e => setInput(e.target.value)} 
+                                           className="flex-1 bg-transparent border border-zinc-700 rounded-2xl p-3 outline-none" placeholder="Comando..." />
+                                    <button onClick={() => handleSend()} className="bg-orange-600 p-4 rounded-xl">➤</button>
+                                </div>
+                            </footer>
+                        </>
+                    )}
 
-                    <footer className="p-4 bg-gray-900 flex gap-2 items-center">
-                        <button onClick={toggleMic} className={`p-4 rounded-full ${listening ? 'bg-red-600 animate-pulse' : 'bg-gray-800'}`}>🎙️</button>
-                        <input value={input} onChange={e => setInput(e.target.value)} className="flex-1 bg-black p-3 rounded-xl outline-none" placeholder="Digite ou fale..."/>
-                        <button onClick={() => send()} className="bg-orange-600 p-4 rounded-xl font-bold">➤</button>
-                    </footer>
+                    {/* Tela de Câmera Fullscreen */}
+                    {view === 'camera' && (
+                        <div className="camera-overlay">
+                            <video ref={videoRef} onPlay={onVideoPlay} autoPlay muted playsInline id="webcam"></video>
+                            <canvas ref={canvasRef} id="overlay-canvas"></canvas>
+                            <div className="absolute bottom-10 w-full flex justify-center gap-10">
+                                <button onClick={() => setFacingMode(f => f === 'user' ? 'environment' : 'user')} 
+                                        className="bg-white/20 p-4 rounded-full backdrop-blur-md">🔄</button>
+                                <button onClick={() => setView('chat')} 
+                                        className="bg-red-600 p-4 rounded-full text-white">✖</button>
+                            </div>
+                        </div>
+                    )}
 
-                    {showCam && (
-                        <div className="cam-screen" style={{display: 'block'}}>
-                            <video ref={videoRef} onPlay={onPlay} autoPlay muted playsInline />
-                            <canvas ref={canvasRef} />
-                            <button onClick={() => setShowCam(false)} className="absolute top-10 right-5 bg-red-600 p-3 rounded-full font-bold">X</button>
+                    {/* Galeria */}
+                    {view === 'gallery' && (
+                        <div className="flex-1 p-4 overflow-y-auto">
+                            <button onClick={() => setView('chat')} className="mb-4 text-orange-500">← Voltar</button>
+                            <div className="grid grid-cols-3 gap-2">
+                                {gallery.map(p => (
+                                    <div key={p.id} className="aspect-square bg-zinc-800 rounded-lg overflow-hidden border border-zinc-700">
+                                        <img src={p.image} className="w-full h-full object-cover" />
+                                    </div>
+                                ))}
+                            </div>
+                            {gallery.length === 0 && <p className="text-center text-zinc-500 mt-20">Nenhum registro visual.</p>}
                         </div>
                     )}
                 </div>
             );
         }
+
         ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
 </body>
