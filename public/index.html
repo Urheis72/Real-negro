@@ -3,173 +3,256 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis Assistant</title>
+    <title>SISTEMA J.A.R.V.I.S</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body { background-color: #0f172a; color: white; font-family: 'Inter', sans-serif; }
-        #camera-container { position: relative; width: 100%; max-width: 400px; margin: 0 auto; display: none; }
-        video { width: 100%; border-radius: 12px; }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+        
+        body {
+            background-color: #050505;
+            color: #e5e5e5;
+            font-family: 'Orbitron', sans-serif;
+            overflow: hidden;
+        }
+
+        /* FIRE THEME ANIMATION */
+        .fire-bg {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at bottom, #450a0a 0%, #000000 70%);
+            z-index: -1;
+            animation: pulse 4s infinite alternate;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.8; }
+            100% { opacity: 1; }
+        }
+
+        .glass-panel {
+            background: rgba(20, 20, 20, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(220, 38, 38, 0.3);
+            box-shadow: 0 0 20px rgba(220, 38, 38, 0.2);
+        }
+
+        .glow-text {
+            text-shadow: 0 0 10px #ef4444;
+        }
+
+        /* CHAT STYLES */
+        .msg-user { background: linear-gradient(90deg, #991b1b, #7f1d1d); border-right: 3px solid #ef4444; }
+        .msg-bot { background: linear-gradient(90deg, #1f2937, #111827); border-left: 3px solid #3b82f6; }
+
+        /* CAMERA OVERLAY */
+        #camera-wrapper { position: relative; width: 100%; max-width: 400px; display: none; margin: 0 auto 1rem; }
+        video { width: 100%; border-radius: 8px; border: 2px solid #ef4444; }
         canvas { position: absolute; top: 0; left: 0; }
-        .chat-bubble { max-width: 80%; padding: 10px 15px; border-radius: 12px; margin-bottom: 10px; }
-        .user-msg { background-color: #3b82f6; align-self: flex-end; }
-        .bot-msg { background-color: #1e293b; align-self: flex-start; border: 1px solid #334155; }
     </style>
 </head>
-<body class="h-screen flex flex-col items-center">
+<body class="flex flex-col h-screen items-center justify-center">
 
-    <header class="w-full p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center">
-        <h1 class="text-xl font-bold text-blue-400">J.A.R.V.I.S.</h1>
-        <button onclick="toggleCamera()" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-sm">
-            📷 Câmera
-        </button>
-    </header>
+    <div class="fire-bg"></div>
 
-    <div id="camera-container" class="mt-4">
-        <video id="video" autoplay muted></video>
-        <canvas id="overlay"></canvas>
+    <div id="login-screen" class="glass-panel p-8 rounded-2xl flex flex-col items-center w-96 space-y-4">
+        <h1 class="text-3xl font-bold text-red-500 glow-text mb-4">LOGIN SEGURO</h1>
+        
+        <div id="step-1" class="w-full flex flex-col space-y-3">
+            <input type="text" id="phone" placeholder="+55..." class="w-full bg-black/50 border border-red-900 rounded p-3 text-center text-white focus:outline-none focus:border-red-500">
+            <button onclick="requestAuth()" class="w-full bg-red-700 hover:bg-red-600 p-3 rounded font-bold transition">ENVIAR CÓDIGO</button>
+        </div>
+
+        <div id="step-2" class="w-full flex flex-col space-y-3 hidden">
+            <input type="text" id="code" placeholder="Código Telegram" class="w-full bg-black/50 border border-red-900 rounded p-3 text-center text-white focus:outline-none focus:border-red-500">
+            <button onclick="submitLogin()" class="w-full bg-green-700 hover:bg-green-600 p-3 rounded font-bold transition">ENTRAR</button>
+        </div>
+        <p id="login-status" class="text-xs text-gray-400 mt-2"></p>
     </div>
 
-    <div id="chat-box" class="flex-1 w-full max-w-lg p-4 overflow-y-auto flex flex-col">
-        <div class="bot-msg chat-bubble">
-            Olá. Sou o Jarvis. Use comandos (/) para Telegram ou fale naturalmente.
+    <div id="app-screen" class="w-full h-full flex flex-col max-w-lg hidden">
+        
+        <header class="p-4 flex justify-between items-center glass-panel border-b-0 rounded-b-xl mx-2 mt-2">
+            <span class="text-red-500 font-bold tracking-widest">J.A.R.V.I.S</span>
+            <button onclick="toggleCam()" class="bg-red-900/50 hover:bg-red-600 px-3 py-1 rounded text-xs border border-red-500">📷 CÂMERA</button>
+        </header>
+
+        <div id="camera-wrapper" class="mt-2">
+            <video id="video" autoplay muted playsinline></video>
+            <canvas id="overlay"></canvas>
+        </div>
+
+        <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+            <div class="msg-bot p-3 rounded-lg max-w-[85%] text-sm leading-relaxed">
+                Sistemas online. Comandos de busca e IA ativos.
+            </div>
+        </div>
+
+        <div class="p-4 glass-panel m-2 rounded-xl">
+            <form id="chat-form" class="flex gap-2">
+                <input type="text" id="msg-input" placeholder="Digite comando ou fale..." 
+                    class="flex-1 bg-black/50 border border-red-900 rounded p-3 text-white focus:border-red-500 outline-none">
+                <button type="submit" class="bg-red-700 px-5 rounded font-bold">➤</button>
+            </form>
         </div>
     </div>
 
-    <div class="w-full max-w-lg p-4 bg-slate-900">
-        <form id="chat-form" class="flex gap-2">
-            <input type="text" id="msg-input" placeholder="Digite aqui..." 
-                   class="flex-1 bg-slate-800 text-white p-3 rounded-lg border border-slate-700 focus:outline-none focus:border-blue-500">
-            <button type="submit" class="bg-blue-600 px-6 py-2 rounded-lg font-bold">Enviar</button>
-        </form>
-    </div>
-
     <script>
-        const chatBox = document.getElementById('chat-box');
-        const form = document.getElementById('chat-form');
-        const input = document.getElementById('msg-input');
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('overlay');
-        const cameraContainer = document.getElementById('camera-container');
-
-        let isCameraOn = false;
-        let detectedFaces = new Map(); // Store face IDs
-        let nextFaceId = 1;
-
-        // --- AUDIO PLAYER ---
-        function playAudio(base64Audio) {
-            if (!base64Audio) return;
-            const audio = new Audio("data:audio/mp3;base64," + base64Audio);
-            audio.play().catch(e => console.log("Audio autoplay blocked:", e));
+        // --- LOGIC: LOGIN ---
+        async function requestAuth() {
+            const phone = document.getElementById('phone').value;
+            setStatus('Enviando solicitação...');
+            const res = await post('/auth/code', { phone });
+            if(res.status === 'sent') {
+                document.getElementById('step-1').classList.add('hidden');
+                document.getElementById('step-2').classList.remove('hidden');
+                setStatus('Código enviado. Verifique seu Telegram.');
+            } else {
+                setStatus('Erro: ' + (res.error || 'Desconhecido'));
+            }
         }
 
-        // --- CHAT LOGIC ---
-        function addMessage(text, isUser) {
+        async function submitLogin() {
+            const code = document.getElementById('code').value;
+            setStatus('Autenticando...');
+            const res = await post('/auth/login', { code });
+            if(res.status === 'success') {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-screen').classList.remove('hidden');
+                loadFaceAPI(); // Pre-load models
+            } else {
+                setStatus('Erro no login: ' + res.error);
+            }
+        }
+
+        function setStatus(msg) { document.getElementById('login-status').innerText = msg; }
+
+        // --- LOGIC: CHAT & VOICE ---
+        const chatBox = document.getElementById('chat-box');
+        const sessionID = 'sess-' + Math.random().toString(36).substr(2, 9);
+
+        document.getElementById('chat-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('msg-input');
+            const text = input.value.trim();
+            if(!text) return;
+
+            addMsg(text, true);
+            input.value = '';
+
+            try {
+                const data = await post('/chat', { message: text, session_id: sessionID });
+                addMsg(data.text, false);
+                if(data.audio) playAudio(data.audio);
+            } catch(e) {
+                addMsg("Erro de conexão com o servidor.", false);
+            }
+        };
+
+        function addMsg(text, isUser) {
             const div = document.createElement('div');
-            div.className = `chat-bubble ${isUser ? 'user-msg' : 'bot-msg'}`;
-            div.innerText = text; // Safe text insertion
+            div.className = `p-3 rounded-lg max-w-[85%] text-sm leading-relaxed ${isUser ? 'msg-user self-end ml-auto' : 'msg-bot self-start'}`;
+            div.innerText = text;
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        form.onsubmit = async (e) => {
-            e.preventDefault();
-            const text = input.value.trim();
-            if (!text) return;
+        function playAudio(b64) {
+            const audio = new Audio("data:audio/mp3;base64," + b64);
+            audio.play().catch(e => console.warn("Audio autoplay blocked"));
+        }
 
-            addMessage(text, true);
-            input.value = '';
+        async function post(url, data) {
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            return await r.json();
+        }
 
-            try {
-                const res = await fetch('/chat', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ message: text, session_id: 'user-1' })
-                });
-                const data = await res.json();
-                
-                addMessage(data.text, false);
-                if (data.audio) playAudio(data.audio);
+        // --- LOGIC: CAMERA & FACE DETECTION ---
+        let isCamOpen = false;
+        let detectedFaces = new Set(); // Store IDs of captured faces
+        let nextId = 1;
 
-            } catch (err) {
-                addMessage("Erro de conexão.", false);
-            }
-        };
-
-        // --- CAMERA & FACE RECOGNITION LOGIC ---
-        async function loadModels() {
-            // Loading models from a public CDN for ease of use
+        async function loadFaceAPI() {
             await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
         }
 
-        async function toggleCamera() {
-            if (isCameraOn) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-                cameraContainer.style.display = 'none';
-                isCameraOn = false;
+        async function toggleCam() {
+            const wrap = document.getElementById('camera-wrapper');
+            const video = document.getElementById('video');
+            
+            if(isCamOpen) {
+                video.srcObject.getTracks().forEach(t => t.stop());
+                wrap.style.display = 'none';
+                isCamOpen = false;
             } else {
-                cameraContainer.style.display = 'block';
-                await loadModels();
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                wrap.style.display = 'block';
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 video.srcObject = stream;
-                isCameraOn = true;
-                detectFaces();
+                isCamOpen = true;
+                detectLoop();
             }
         }
 
-        async function detectFaces() {
-            if (!isCameraOn) return;
+        async function detectLoop() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('overlay');
+            
+            // Wait for video load
+            if(video.readyState < 2) return setTimeout(detectLoop, 100);
 
-            const displaySize = { width: video.videoWidth || 300, height: video.videoHeight || 200 };
+            const displaySize = { width: video.videoWidth, height: video.videoHeight };
             faceapi.matchDimensions(canvas, displaySize);
 
             setInterval(async () => {
+                if(!isCamOpen) return;
+                
                 const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
-                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const resized = faceapi.resizeResults(detections, displaySize);
                 
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                resizedDetections.forEach(det => {
+                resized.forEach((det, i) => {
                     const box = det.box;
-                    
-                    // Simple logic: If face is detected, assign ID (in real app, use descriptors)
-                    // Here we just visualize "Face 1" for the first detection in frame
-                    
+                    const id = nextId + i; // Simple ID logic based on array index for demo
+
                     // Draw Box
-                    ctx.strokeStyle = '#ef4444'; // Red-500
+                    ctx.strokeStyle = '#ef4444';
                     ctx.lineWidth = 3;
                     ctx.strokeRect(box.x, box.y, box.width, box.height);
 
-                    // Draw Label
+                    // Draw ID
                     ctx.fillStyle = '#ef4444';
-                    ctx.fillRect(box.x, box.y - 30, box.width, 30);
-                    ctx.fillStyle = 'white';
-                    ctx.font = '16px Arial';
-                    ctx.fillText(`Face ${nextFaceId}`, box.x + 5, box.y - 10);
-                    
-                    // Capture Logic (Once per session per face)
-                    if (!detectedFaces.has(nextFaceId)) {
-                        detectedFaces.set(nextFaceId, true);
-                        takeSnapshot();
+                    ctx.fillRect(box.x, box.y - 25, 60, 25);
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillText(`ID: ${id}`, box.x + 5, box.y - 7);
+
+                    // Capture Logic (Once per "ID")
+                    // In a real app, you'd use face descriptors to track identity persistence
+                    if(!detectedFaces.has(id)) {
+                        // Simulate "seeing face for 1 sec" by simple presence check
+                        detectedFaces.add(id);
+                        snap(video);
                     }
                 });
             }, 500);
         }
 
-        function takeSnapshot() {
-            // Capture logic
-            const capCanvas = document.createElement('canvas');
-            capCanvas.width = video.videoWidth;
-            capCanvas.height = video.videoHeight;
-            capCanvas.getContext('2d').drawImage(video, 0, 0);
-            
-            // Send to backend (Silent upload)
-            capCanvas.toBlob(blob => {
-                const formData = new FormData();
-                formData.append('image', blob);
-                fetch('/upload_face', { method: 'POST', body: formData });
-                console.log("📸 Face captured and sent.");
+        function snap(video) {
+            const c = document.createElement('canvas');
+            c.width = video.videoWidth;
+            c.height = video.videoHeight;
+            c.getContext('2d').drawImage(video, 0, 0);
+            c.toBlob(blob => {
+                const fd = new FormData();
+                fd.append('image', blob);
+                fetch('/upload_face', { method: 'POST', body: fd });
+                console.log("📸 Foto capturada!");
             });
         }
     </script>
