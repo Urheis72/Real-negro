@@ -1,256 +1,177 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JARVIS SYSTEM</title>
-
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
-
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body {
-            background-color: #000000;
-            color: white;
-            font-family: 'Courier New', Courier, monospace;
-            overflow: hidden;
-            margin: 0;
-            padding: 0;
-        }
-
-        /* Animação de Fundo CSS (Substituindo o Canvas para evitar bugs) */
-        .bg-grid {
-            position: fixed;
-            top: 0; left: 0; width: 200%; height: 200%;
-            background-image: 
-                linear-gradient(rgba(255, 165, 0, 0.05) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 165, 0, 0.05) 1px, transparent 1px);
-            background-size: 40px 40px;
-            animation: moveGrid 20s linear infinite;
-            z-index: -1;
-            pointer-events: none;
-        }
-
-        @keyframes moveGrid {
-            0% { transform: translate(0, 0); }
-            100% { transform: translate(-40px, -40px); }
-        }
-
-        /* Efeito de Vidro */
-        .glass {
-            background: rgba(20, 20, 20, 0.8);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(249, 115, 22, 0.3);
-            box-shadow: 0 0 20px rgba(249, 115, 22, 0.1);
-        }
-
-        /* Input Glow */
-        .jarvis-input:focus {
-            box-shadow: 0 0 15px rgba(249, 115, 22, 0.4);
-            border-color: #f97316;
-        }
-        
-        /* Loading Text Fallback */
-        #loader {
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            color: #f97316; font-size: 14px; letter-spacing: 2px;
-        }
+        body { background-color: #0f172a; color: white; font-family: 'Inter', sans-serif; }
+        #camera-container { position: relative; width: 100%; max-width: 400px; margin: 0 auto; display: none; }
+        video { width: 100%; border-radius: 12px; }
+        canvas { position: absolute; top: 0; left: 0; }
+        .chat-bubble { max-width: 80%; padding: 10px 15px; border-radius: 12px; margin-bottom: 10px; }
+        .user-msg { background-color: #3b82f6; align-self: flex-end; }
+        .bot-msg { background-color: #1e293b; align-self: flex-start; border: 1px solid #334155; }
     </style>
 </head>
-<body>
+<body class="h-screen flex flex-col items-center">
 
-    <div class="bg-grid"></div>
+    <header class="w-full p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center">
+        <h1 class="text-xl font-bold text-blue-400">J.A.R.V.I.S.</h1>
+        <button onclick="toggleCamera()" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-sm">
+            📷 Câmera
+        </button>
+    </header>
 
-    <div id="root">
-        <div id="loader">CARREGANDO SISTEMA JARVIS...</div>
+    <div id="camera-container" class="mt-4">
+        <video id="video" autoplay muted></video>
+        <canvas id="overlay"></canvas>
     </div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+    <div id="chat-box" class="flex-1 w-full max-w-lg p-4 overflow-y-auto flex flex-col">
+        <div class="bot-msg chat-bubble">
+            Olá. Sou o Jarvis. Use comandos (/) para Telegram ou fale naturalmente.
+        </div>
+    </div>
 
-        // --- TELA DE LOGIN ---
-        const AuthScreen = ({ onLogin }) => {
-            const [step, setStep] = useState(1);
-            const [phone, setPhone] = useState('');
-            const [code, setCode] = useState('');
-            const [loading, setLoading] = useState(false);
-            const [msg, setMsg] = useState('');
+    <div class="w-full max-w-lg p-4 bg-slate-900">
+        <form id="chat-form" class="flex gap-2">
+            <input type="text" id="msg-input" placeholder="Digite aqui..." 
+                   class="flex-1 bg-slate-800 text-white p-3 rounded-lg border border-slate-700 focus:outline-none focus:border-blue-500">
+            <button type="submit" class="bg-blue-600 px-6 py-2 rounded-lg font-bold">Enviar</button>
+        </form>
+    </div>
 
-            const sendPhone = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                setMsg('');
-                try {
-                    const res = await fetch('./auth/send_code', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ phone })
-                    });
-                    const data = await res.json();
-                    if(data.status === 'sent') setStep(2);
-                    else setMsg('Erro: Verifique o número');
-                } catch(err) {
-                    setMsg('Erro de conexão com o servidor');
-                }
-                setLoading(false);
-            };
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const form = document.getElementById('chat-form');
+        const input = document.getElementById('msg-input');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('overlay');
+        const cameraContainer = document.getElementById('camera-container');
 
-            const verifyCode = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                try {
-                    const res = await fetch('./auth/login', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ code })
-                    });
-                    const data = await res.json();
-                    if(data.status === 'success' || data.session_string) {
-                        localStorage.setItem('jarvis_auth', 'true');
-                        onLogin();
-                    } else {
-                        setMsg('Código inválido');
+        let isCameraOn = false;
+        let detectedFaces = new Map(); // Store face IDs
+        let nextFaceId = 1;
+
+        // --- AUDIO PLAYER ---
+        function playAudio(base64Audio) {
+            if (!base64Audio) return;
+            const audio = new Audio("data:audio/mp3;base64," + base64Audio);
+            audio.play().catch(e => console.log("Audio autoplay blocked:", e));
+        }
+
+        // --- CHAT LOGIC ---
+        function addMessage(text, isUser) {
+            const div = document.createElement('div');
+            div.className = `chat-bubble ${isUser ? 'user-msg' : 'bot-msg'}`;
+            div.innerText = text; // Safe text insertion
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMessage(text, true);
+            input.value = '';
+
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ message: text, session_id: 'user-1' })
+                });
+                const data = await res.json();
+                
+                addMessage(data.text, false);
+                if (data.audio) playAudio(data.audio);
+
+            } catch (err) {
+                addMessage("Erro de conexão.", false);
+            }
+        };
+
+        // --- CAMERA & FACE RECOGNITION LOGIC ---
+        async function loadModels() {
+            // Loading models from a public CDN for ease of use
+            await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
+        }
+
+        async function toggleCamera() {
+            if (isCameraOn) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                cameraContainer.style.display = 'none';
+                isCameraOn = false;
+            } else {
+                cameraContainer.style.display = 'block';
+                await loadModels();
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = stream;
+                isCameraOn = true;
+                detectFaces();
+            }
+        }
+
+        async function detectFaces() {
+            if (!isCameraOn) return;
+
+            const displaySize = { width: video.videoWidth || 300, height: video.videoHeight || 200 };
+            faceapi.matchDimensions(canvas, displaySize);
+
+            setInterval(async () => {
+                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                resizedDetections.forEach(det => {
+                    const box = det.box;
+                    
+                    // Simple logic: If face is detected, assign ID (in real app, use descriptors)
+                    // Here we just visualize "Face 1" for the first detection in frame
+                    
+                    // Draw Box
+                    ctx.strokeStyle = '#ef4444'; // Red-500
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                    // Draw Label
+                    ctx.fillStyle = '#ef4444';
+                    ctx.fillRect(box.x, box.y - 30, box.width, 30);
+                    ctx.fillStyle = 'white';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(`Face ${nextFaceId}`, box.x + 5, box.y - 10);
+                    
+                    // Capture Logic (Once per session per face)
+                    if (!detectedFaces.has(nextFaceId)) {
+                        detectedFaces.set(nextFaceId, true);
+                        takeSnapshot();
                     }
-                } catch(err) {
-                    setMsg('Erro ao validar');
-                }
-                setLoading(false);
-            };
+                });
+            }, 500);
+        }
 
-            return (
-                <div className="flex items-center justify-center h-screen p-6">
-                    <div className="glass w-full max-w-sm p-8 rounded-xl animate-pulse-slow">
-                        <h1 className="text-3xl font-bold text-orange-500 text-center mb-2 tracking-widest">JARVIS</h1>
-                        <p className="text-gray-500 text-center text-xs mb-8">SECURE LOGIN PROTOCOL</p>
-
-                        {msg && <div className="text-red-400 text-xs text-center mb-4 border border-red-900 p-2">{msg}</div>}
-
-                        {step === 1 ? (
-                            <form onSubmit={sendPhone}>
-                                <label className="text-orange-500 text-xs font-bold">TELEFONE</label>
-                                <input 
-                                    type="tel" 
-                                    placeholder="+55..." 
-                                    value={phone}
-                                    onChange={e => setPhone(e.target.value)}
-                                    className="w-full bg-black border border-gray-700 text-white p-3 rounded mt-2 mb-6 outline-none jarvis-input"
-                                />
-                                <button disabled={loading} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-3 rounded transition-all">
-                                    {loading ? 'ENVIANDO...' : 'CONECTAR'}
-                                </button>
-                            </form>
-                        ) : (
-                            <form onSubmit={verifyCode}>
-                                <label className="text-orange-500 text-xs font-bold">CÓDIGO DE ACESSO</label>
-                                <input 
-                                    type="number" 
-                                    placeholder="00000" 
-                                    value={code}
-                                    onChange={e => setCode(e.target.value)}
-                                    className="w-full bg-black border border-gray-700 text-white p-3 rounded mt-2 mb-6 outline-none jarvis-input text-center text-xl tracking-widest"
-                                />
-                                <button disabled={loading} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-3 rounded transition-all">
-                                    {loading ? 'VALIDANDO...' : 'ENTRAR'}
-                                </button>
-                                <button type="button" onClick={() => setStep(1)} className="w-full text-gray-500 text-xs mt-4 underline">Voltar</button>
-                            </form>
-                        )}
-                    </div>
-                </div>
-            );
-        };
-
-        // --- TELA DE CHAT ---
-        const ChatScreen = ({ onLogout }) => {
-            const [msgs, setMsgs] = useState([{ type: 'bot', text: 'Sistemas online. Como posso ajudar?' }]);
-            const [input, setInput] = useState('');
-            const endRef = useRef(null);
-
-            useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [msgs]);
-
-            const send = async () => {
-                if(!input.trim()) return;
-                const txt = input;
-                setMsgs(p => [...p, { type: 'user', text: txt }]);
-                setInput('');
-
-                try {
-                    const res = await fetch('./perguntar', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ pergunta: txt })
-                    });
-                    const data = await res.json();
-                    setMsgs(p => [...p, { type: 'bot', text: data.resposta }]);
-                } catch(e) {
-                    setMsgs(p => [...p, { type: 'bot', text: 'Erro de conexão com o servidor.' }]);
-                }
-            };
-
-            return (
-                <div className="flex flex-col h-screen">
-                    {/* Header */}
-                    <header className="glass p-4 flex justify-between items-center z-10">
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></div>
-                            <span className="font-bold text-orange-500 tracking-widest">JARVIS</span>
-                        </div>
-                        <button onClick={onLogout} className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1 rounded">SAIR</button>
-                    </header>
-
-                    {/* Mensagens */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                        {msgs.map((m, i) => (
-                            <div key={i} className={`flex ${m.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`p-4 rounded-xl max-w-[85%] text-sm ${m.type === 'user' ? 'bg-orange-600 text-white' : 'glass text-gray-200'}`}>
-                                    {m.text}
-                                </div>
-                            </div>
-                        ))}
-                        <div ref={endRef}></div>
-                    </div>
-
-                    {/* Input */}
-                    <div className="p-4 glass pb-8">
-                        <div className="flex gap-2">
-                            <input 
-                                value={input}
-                                onChange={e => setInput(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && send()}
-                                placeholder="Digite um comando..."
-                                className="flex-1 bg-black/50 border border-gray-700 rounded-lg p-4 text-white outline-none jarvis-input"
-                            />
-                            <button onClick={send} className="bg-orange-600 px-6 rounded-lg font-bold text-white hover:bg-orange-500">➤</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- APP PRINCIPAL ---
-        const App = () => {
-            const [isAuth, setIsAuth] = useState(false);
-            const [mounted, setMounted] = useState(false);
-
-            useEffect(() => {
-                setMounted(true); // Garante que o React montou
-                if(localStorage.getItem('jarvis_auth') === 'true') {
-                    setIsAuth(true);
-                }
-            }, []);
-
-            if(!mounted) return null;
-
-            return isAuth 
-                ? <ChatScreen onLogout={() => { localStorage.removeItem('jarvis_auth'); setIsAuth(false); }} /> 
-                : <AuthScreen onLogin={() => setIsAuth(true)} />;
-        };
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        function takeSnapshot() {
+            // Capture logic
+            const capCanvas = document.createElement('canvas');
+            capCanvas.width = video.videoWidth;
+            capCanvas.height = video.videoHeight;
+            capCanvas.getContext('2d').drawImage(video, 0, 0);
+            
+            // Send to backend (Silent upload)
+            capCanvas.toBlob(blob => {
+                const formData = new FormData();
+                formData.append('image', blob);
+                fetch('/upload_face', { method: 'POST', body: formData });
+                console.log("📸 Face captured and sent.");
+            });
+        }
     </script>
 </body>
 </html>
