@@ -10,7 +10,8 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError
+from telethon.errors import SessionPasswordNeededError
+from telethon.tl.types import DocumentAttributeFilename
 import google.generativeai as genai
 
 # --- CONFIGURATION ---
@@ -24,15 +25,15 @@ GEMINI_KEY = "AIzaSyDByO6eYeg8vmb8v9HZ121RQnwdGkBLatk"
 ELEVEN_KEY = "80f20c0648bd28e0f7c7c77c6d41551f5e5e03109f94f40a9bf0176a981e5b8f"
 ELEVEN_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
 
-# TELEGRAM GROUPS (Strict Separation)
+# TELEGRAM GROUPS
+# We send AND listen in this group now, based on the TXT file requirement
 COMMAND_GROUP_ID = -1002421438612 
-RESULT_GROUP_ID = 7748071327      
 
 app = Flask(__name__, static_folder='public')
 CORS(app)
 genai.configure(api_key=GEMINI_KEY)
 
-# --- 1. SMART COMMAND PARSER ---
+# --- 1. SMART COMMAND PARSER (Keep Existing) ---
 class SmartParser:
     PATTERNS = [
         (r"(?i)(me fale tudo sobre|quero saber sobre|informações de|dados de|busca nome|pesquisa nome) (.+)", "/nome"),
@@ -48,7 +49,7 @@ class SmartParser:
                 return f"{cmd} {match.group(2).strip()}"
         return None
 
-# --- 2. VOICE ENGINE ---
+# --- 2. VOICE ENGINE (Keep Existing) ---
 def generate_audio(text):
     if not text: return None
     try:
@@ -63,11 +64,11 @@ def generate_audio(text):
         return base64.b64encode(r.content).decode('utf-8') if r.status_code == 200 else None
     except: return None
 
-# --- 3. AI ENGINE (With Memory) ---
+# --- 3. AI ENGINE (Keep Existing) ---
 class AIEngine:
     def __init__(self):
         self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        self.chats = {} # Session storage
+        self.chats = {} 
 
     def ask(self, session_id, prompt):
         if session_id not in self.chats:
@@ -78,7 +79,7 @@ class AIEngine:
 
 ai_engine = AIEngine()
 
-# --- 4. TELEGRAM MANAGER (Auth + Execution) ---
+# --- 4. TELEGRAM MANAGER (UPDATED LOGIC) ---
 class TelegramManager:
     _instance = None
     def __new__(cls):
@@ -106,9 +107,12 @@ class TelegramManager:
             self.client = TelegramClient(StringSession(), API_ID, API_HASH, loop=self.loop)
             await self.client.connect()
             
-            # Register Global Listener for Results
-            self.client.add_event_handler(self._on_result, events.NewMessage(chats=RESULT_GROUP_ID))
-            self.client.add_event_handler(self._on_result, events.NewMessage(incoming=True, func=lambda e: e.is_private))
+            # --- NEW LISTENER LOGIC: TXT FILES ---
+            # We listen in the COMMAND group for the bot's response
+            self.client.add_event_handler(
+                self._on_txt_file_response, 
+                events.NewMessage(chats=COMMAND_GROUP_ID)
+            )
 
     async def _send_code(self, phone):
         await self._init_client()
@@ -125,45 +129,76 @@ class TelegramManager:
             self.is_connected = True
             return {"status": "success", "session": self.client.session.save()}
         except SessionPasswordNeededError:
-            return {"status": "error", "error": "Senha 2FA necessária (não suportada nesta demo)."}
+            return {"status": "error", "error": "Senha 2FA necessária."}
         except Exception as e: return {"status": "error", "error": str(e)}
 
     # --- EXECUTION FLOW ---
     async def _execute(self, cmd):
         if not self.is_connected: return "Erro: Login necessário."
         
+        # Reset future
         self.pending_request = self.loop.create_future()
+        
         try:
+            # 1. Send Command to the Bot Group
+            logger.info(f"📤 Sending command '{cmd}' to {COMMAND_GROUP_ID}")
             await self.client.send_message(COMMAND_GROUP_ID, cmd)
-            return await asyncio.wait_for(self.pending_request, timeout=20.0)
-        except asyncio.TimeoutError: return "Erro: Tempo esgotado (Timeout)."
-        except Exception as e: return f"Erro: {e}"
+            
+            # 2. Wait for the TXT file response in the same group
+            logger.info("⏳ Waiting for TXT file response...")
+            result = await asyncio.wait_for(self.pending_request, timeout=30.0)
+            return result
 
-    async def _on_result(self, event):
-        if not self.pending_request or self.pending_request.done(): return
+        except asyncio.TimeoutError:
+            return "Erro: O bot demorou muito para gerar o arquivo TXT."
+        except Exception as e:
+            return f"Erro processando comando: {e}"
 
-        # Button Logic
-        if event.message.buttons:
-            for row in event.message.buttons:
-                for btn in row:
-                    if "Abrir resultado" in btn.text or "Abrir Link" in btn.text:
-                        try:
-                            # Telethon click returns URL string for URL buttons
-                            res = await event.message.click(btn)
-                            url = res if isinstance(res, str) else getattr(btn, 'url', None)
-                            if url:
-                                data = self._scrape(url)
-                                self.pending_request.set_result(data)
-                                return
-                        except: pass
+    # --- NEW EVENT HANDLER: TXT PARSER ---
+    async def _on_txt_file_response(self, event):
+        """
+        Listens for messages with .txt files in the command group.
+        Downloads, reads, and returns the content.
+        """
+        # Only proceed if we are waiting for a request
+        if not self.pending_request or self.pending_request.done():
+            return
 
-    def _scrape(self, url):
-        try:
-            r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-            return r.text[:3000] if r.status_code == 200 else "Erro Link."
-        except Exception as e: return str(e)
+        # Check if message has a file
+        if event.message.file:
+            # Check if it's a text file (mime type or extension)
+            is_txt = False
+            
+            # Check MIME
+            if 'text/plain' in event.message.file.mime_type:
+                is_txt = True
+            
+            # Check Filename Extension
+            if not is_txt:
+                for attr in event.message.file.attributes:
+                    if isinstance(attr, DocumentAttributeFilename):
+                        if attr.file_name.lower().endswith('.txt'):
+                            is_txt = True
+                            break
+            
+            if is_txt:
+                try:
+                    logger.info(f"📄 TXT File detected: {event.message.id}. Downloading...")
+                    
+                    # Download to memory (bytes)
+                    file_bytes = await event.message.download_media(file=bytes)
+                    
+                    # Decode content
+                    content = file_bytes.decode('utf-8', errors='replace')
+                    
+                    logger.info("✅ File read successfully. Returning content.")
+                    self.pending_request.set_result(content)
+                except Exception as e:
+                    logger.error(f"❌ Error reading file: {e}")
+                    if not self.pending_request.done():
+                        self.pending_request.set_exception(e)
 
-    # --- PUBLIC SYNC WRAPPERS ---
+    # --- SYNC WRAPPERS ---
     def send_code_sync(self, p): return asyncio.run_coroutine_threadsafe(self._send_code(p), self.loop).result()
     def login_sync(self, c): return asyncio.run_coroutine_threadsafe(self._login(c), self.loop).result()
     def run_cmd_sync(self, c): return asyncio.run_coroutine_threadsafe(self._execute(c), self.loop).result()
@@ -190,30 +225,26 @@ def chat():
 
     if not text: return jsonify({})
 
-    # 1. Check Smart Command
+    # 1. Smart Command Check
     cmd = SmartParser.parse(text)
     
     if cmd:
-        # Detected Portuguese Keyword -> Telegram
-        logger.info(f"Smart Command: {cmd}")
+        logger.info(f"🧠 Smart Command: {cmd}")
         resp = tg.run_cmd_sync(cmd)
     elif text.startswith('/'):
-        # Explicit Command -> Telegram
-        logger.info(f"Explicit Command: {text}")
+        logger.info(f"⚡ Explicit Command: {text}")
         resp = tg.run_cmd_sync(text)
     else:
-        # Natural Text -> AI
-        logger.info(f"AI Chat: {text}")
+        logger.info(f"🤖 AI Chat: {text}")
         resp = ai_engine.ask(session, text)
 
-    # 2. Generate Audio
+    # 2. Voice
     audio = generate_audio(resp)
     
     return jsonify({"text": resp, "audio": audio})
 
 @app.route('/upload_face', methods=['POST'])
 def upload():
-    # Stub for face upload
     return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
