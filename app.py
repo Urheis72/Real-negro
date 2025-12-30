@@ -165,4 +165,3 @@ def auth_l(): return jsonify(tg.finalize_login(request.json.get('code')))
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
-            
