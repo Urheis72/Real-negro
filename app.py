@@ -6,7 +6,7 @@ import requests
 from flask import Flask, render_template_string, request, jsonify
 from flask_cors import CORS
 from telethon import TelegramClient
-from google.genai import GoogleGenAI  # Conforme seu modelo
+from google.genai import GoogleGenAI
 
 # --- CONFIGURAÇÕES ---
 GEMINI_KEY = "AIzaSyAdekalYORl_qzNLGuayZv-7hEZ63ZeVd4"
@@ -19,86 +19,100 @@ TG_GROUP_ID = -1002421438612
 app = Flask(__name__)
 CORS(app)
 
-# Inicializa o Gemini com sua Key
+# Inicializa o cliente conforme seu modelo
 ai = GoogleGenAI(api_key=GEMINI_KEY)
 
 # --- TELEGRAM SETUP ---
 client_tg = TelegramClient('jarvis_session', TG_API_ID, TG_API_HASH)
-tg_loop = asyncio.new_event_loop()
 
-def start_telegram():
-    asyncio.set_event_loop(tg_loop)
+def start_tg_background():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     with client_tg:
         client_tg.loop.run_forever()
 
-threading.Thread(target=start_telegram, daemon=True).start()
+threading.Thread(target=start_tg_background, daemon=True).start()
 
-# --- LÓGICA DE IA (ASYNC conforme seu modelo) ---
-async def call_gemini(message):
+# --- LÓGICA DA IA (MODELO 2.5-FLASH) ---
+async def get_gemini_response(message):
     try:
-        # Alterado para 2.0-flash para evitar o erro 404
-        response = await ai.models.generateContent(
-            model="gemini-2.0-flash", 
+        # Usando exatamente o modelo que você pediu
+        response = await ai.models.generate_content(
+            model="gemini-2.5-flash", 
             contents=message
         )
         return response.text
     except Exception as e:
-        print(f"Erro Gemini: {e}")
-        return f"Erro na IA: {str(e)}"
+        # Fallback caso o 2.5 ainda dê 404 no seu servidor
+        print(f"Erro no 2.5: {e}")
+        response = await ai.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=message
+        )
+        return response.text
 
 # --- LÓGICA DE VOZ ---
-def get_audio_base64(text):
+def generate_voice(text):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
     headers = {"xi-api-key": ELEVEN_KEY, "Content-Type": "application/json"}
-    data = {
+    payload = {
         "text": text,
         "model_id": "eleven_multilingual_v2",
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
     }
     try:
-        res = requests.post(url, json=data, headers=headers)
-        if res.status_code == 200:
-            return base64.b64encode(res.content).decode('utf-8')
-    except: return None
+        r = requests.post(url, json=payload, headers=headers)
+        if r.status_code == 200:
+            return base64.b64encode(r.content).decode('utf-8')
+    except:
+        return None
 
-# --- FRONTEND (HTML + JS) ---
+# --- HTML INTERFACE ---
 HTML_PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JARVIS</title>
+    <title>JARVIS v2.5</title>
     <style>
-        body { background: #000; color: #0ff; font-family: monospace; padding: 20px; }
-        #log { height: 400px; overflow-y: auto; border: 1px solid #333; padding: 10px; margin-bottom: 10px; }
-        input { width: 80%; padding: 10px; background: #111; color: #0ff; border: 1px solid #0ff; }
-        button { padding: 10px; cursor: pointer; background: #0ff; color: #000; border: none; font-weight: bold; }
+        body { background: #000; color: #0ff; font-family: monospace; padding: 20px; text-transform: uppercase; }
+        #console { height: 450px; overflow-y: auto; border: 1px solid #0ff; padding: 15px; background: rgba(0,255,255,0.05); margin-bottom: 20px; }
+        .input-line { display: flex; gap: 10px; }
+        input { flex: 1; background: #000; border: 1px solid #0ff; color: #0ff; padding: 10px; outline: none; }
+        button { background: #0ff; color: #000; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; }
+        .bot-msg { color: #fff; margin: 10px 0; border-left: 2px solid #0ff; padding-left: 10px; }
     </style>
 </head>
 <body>
-    <div id="log"></div>
-    <form onsubmit="ask(event)">
-        <input type="text" id="msg" placeholder="Comando ou Mensagem..." autocomplete="off">
+    <div id="console">SISTEMA INICIALIZADO... AGUARDANDO COMANDO.</div>
+    <form class="input-line" onsubmit="handle(event)">
+        <input type="text" id="user_input" placeholder="DIGITE AQUI..." autocomplete="off">
         <button type="submit">EXECUTAR</button>
     </form>
+
     <script>
-        async function ask(e) {
+        async function handle(e) {
             e.preventDefault();
-            const msg = document.getElementById('msg').value;
-            document.getElementById('msg').value = '';
-            const log = document.getElementById('log');
-            log.innerHTML += `<div>> ${msg}</div>`;
+            const input = document.getElementById('user_input');
+            const consoleBox = document.getElementById('console');
+            const val = input.value;
+            if(!val) return;
+
+            consoleBox.innerHTML += `<div>> ${val}</div>`;
+            input.value = '';
 
             const res = await fetch('/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({message: msg})
+                body: JSON.stringify({message: val})
             });
             const data = await res.json();
-            log.innerHTML += `<div style="color: #ccc">${data.reply}</div>`;
-            log.scrollTop = log.scrollHeight;
 
-            if (data.audio) {
-                new Audio("data:audio/mp3;base64," + data.audio).play();
+            consoleBox.innerHTML += `<div class="bot-msg">${data.reply}</div>`;
+            consoleBox.scrollTop = consoleBox.scrollHeight;
+
+            if(data.audio) {
+                const audio = new Audio("data:audio/mp3;base64," + data.audio);
+                audio.play();
             }
         }
     </script>
@@ -106,24 +120,26 @@ HTML_PAGE = """
 </html>
 """
 
-# --- ROTAS ---
+# --- ROTAS FLASK ---
 @app.route('/')
-def index(): return render_template_string(HTML_PAGE)
+def home():
+    return render_template_string(HTML_PAGE)
 
 @app.route('/chat', methods=['POST'])
-def chat():
-    msg = request.json.get('message', '')
+def chat_endpoint():
+    user_msg = request.json.get('message', '')
     
-    # Se for comando, vai pro Telegram, senão Gemini
-    if msg.startswith('/'):
-        # Lógica simplificada de resposta do telegram
-        reply = "Comando enviado ao Telegram." 
-    else:
-        # Chama a função async do Gemini
-        reply = asyncio.run(call_gemini(msg))
+    # Executa a IA (Assíncrono dentro do Flask Síncrono)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    reply = loop.run_until_complete(get_gemini_response(user_msg))
+    loop.close()
 
-    audio = get_audio_base64(reply)
-    return jsonify({"reply": reply, "audio": audio})
+    # Gera Áudio
+    audio_data = generate_voice(reply)
+
+    return jsonify({"reply": reply, "audio": audio_data})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Porta 8080 é melhor para o Replit
+    app.run(host='0.0.0.0', port=8080)
