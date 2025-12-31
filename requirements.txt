@@ -1,4 +1,6 @@
 flask
 flask-cors
 telethon
-google-generativeai
+google-genai
+requests
+gunicorn
