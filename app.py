@@ -20,6 +20,9 @@ TG_API_ID = 34303434
 TG_API_HASH = "5d521f53f9721a6376586a014b51173d"
 TG_BOT_TOKEN = "SEU_TOKEN_DO_BOTFATHER_AQUI" 
 
+# Modelo Gemini 2.0 Flash Experimental
+MODEL_NAME = 'gemini-2.0-flash-exp'
+
 # ======================================================
 # BACKEND (PYTHON)
 # ======================================================
@@ -27,9 +30,9 @@ TG_BOT_TOKEN = "SEU_TOKEN_DO_BOTFATHER_AQUI"
 app = Flask(__name__)
 CORS(app)
 
-# Configura IA
+# Configura IA com Gemini 2.0
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel(model_name=MODEL_NAME)
 
 # Configura Telegram (Bot Mode para estabilidade)
 client_tg = TelegramClient('jarvis_bot_session', TG_API_ID, TG_API_HASH)
@@ -50,10 +53,11 @@ threading.Thread(target=start_telegram, daemon=True).start()
 # Funções Auxiliares
 def get_ai_response(text):
     try:
+        # Usando Gemini 2.0 Flash Experimental
         response = model.generate_content(text)
         return response.text
     except Exception as e:
-        return f"Erro no processamento neural: {str(e)}"
+        return f"Erro no processamento neural (Gemini 2.0): {str(e)}"
 
 def get_voice(text):
     if not ELEVEN_KEY: return None
@@ -77,7 +81,7 @@ def chat():
     data = request.json
     msg = data.get('message')
     
-    # 1. Pega resposta da IA
+    # 1. Pega resposta da IA (Gemini 2.0)
     reply = get_ai_response(msg)
     
     # 2. Gera áudio
@@ -150,7 +154,8 @@ HTML_PAGE = """
         <div class="bg-black/60 backdrop-blur-md p-8 rounded-3xl border border-yellow-500/30 shadow-2xl max-w-md w-full text-center crown-glow">
             <div class="text-6xl text-yellow-400 mb-6"><i class="fas fa-crown"></i></div>
             <h1 class="text-4xl text-yellow-400 mb-2 font-bold tracking-wider">KING AI</h1>
-            <p class="text-gray-400 mb-8">Conectado ao Servidor Python</p>
+            <p class="text-gray-400 mb-2">Gemini 2.0 Flash Experimental</p>
+            <p class="text-gray-500 text-sm mb-8">Conectado ao Servidor Python</p>
             <button onclick="enterChat()" class="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-4 rounded-xl transition-all hover:scale-105 shadow-[0_0_20px_rgba(234,179,8,0.5)]">
                 ENTRAR NO SISTEMA
             </button>
@@ -165,7 +170,7 @@ HTML_PAGE = """
                 </div>
                 <div>
                     <h2 class="text-yellow-400 font-bold text-lg leading-none">King AI</h2>
-                    <span class="text-xs text-green-400 flex items-center gap-1">● Online (Python)</span>
+                    <span class="text-xs text-green-400 flex items-center gap-1">● Gemini 2.0 Flash</span>
                 </div>
             </div>
             <button onclick="location.reload()" class="text-yellow-400 hover:text-white"><i class="fas fa-sync"></i></button>
@@ -202,7 +207,7 @@ HTML_PAGE = """
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('chatScreen').classList.remove('hidden');
             document.getElementById('chatScreen').style.display = 'flex';
-            addMessage("Sistema online. Aguardando comandos.", 'king');
+            addMessage("Sistema Gemini 2.0 online. Aguardando comandos.", 'king');
         }
 
         async function sendMessage() {
@@ -293,5 +298,11 @@ def home():
     return render_template_string(HTML_PAGE)
 
 if __name__ == '__main__':
+    print("="*50)
+    print("🤖 King AI - Gemini 2.0 Flash Experimental")
+    print("="*50)
+    print(f"Modelo: {MODEL_NAME}")
+    print("Servidor rodando em: http://localhost:5000")
+    print("="*50)
     # Roda o servidor
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
