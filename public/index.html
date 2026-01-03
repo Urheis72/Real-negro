@@ -1,197 +1,444 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis Interface | Premium AI</title>
+    <title>King Chatbot AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    
     <style>
-        body {
-            background-color: #020617;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            color: #f8fafc;
+        /* Estilos Personalizados que complementam o Tailwind */
+        body { font-family: 'Inter', sans-serif; overflow: hidden; }
+        h1, h2, .font-king { font-family: 'Cinzel', serif; }
+        
+        /* Scrollbar Personalizada */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #fbbf24; border-radius: 3px; }
+        
+        /* Animações e Efeitos */
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #fbbf24;
+            border-radius: 50%;
+            opacity: 0.3;
+            pointer-events: none;
+            animation: floatUp linear infinite;
+        }
+        
+        @keyframes floatUp {
+            0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { transform: translateY(-100vh) rotate(360deg); opacity: 0; }
         }
 
-        /* BACKGROUND ANIMADO DISCRETO */
-        .bg-glow {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: radial-gradient(circle at 50% -20%, #1e40af 0%, transparent 45%),
-                        radial-gradient(circle at 0% 100%, #0f172a 0%, transparent 30%);
-            z-index: -1;
-            opacity: 0.6;
+        /* Estilos das Mensagens */
+        .message-king {
+            background: linear-gradient(135deg, #1a1a1a 0%, #000000 100%);
+            border: 1px solid #fbbf24;
+            color: #fbbf24;
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.1);
+        }
+        
+        .message-user {
+            background: #27272a;
+            color: white;
+            border: 1px solid #3f3f46;
         }
 
-        .glass {
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        .crown-badge {
+            position: absolute;
+            top: -10px;
+            left: -10px;
+            background: #fbbf24;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 10px #fbbf24;
+            z-index: 20;
         }
 
-        .glow-cyan { box-shadow: 0 0 20px rgba(6, 182, 212, 0.15); }
-        .text-glow { text-shadow: 0 0 12px rgba(34, 211, 238, 0.5); }
-
-        /* CUSTOM CHAT SCROLLBAR */
-        #chat-container::-webkit-scrollbar { width: 4px; }
-        #chat-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-
-        .bot-message {
-            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9));
-            border-left: 3px solid #06b6d4;
-            animation: slideIn 0.3s ease-out;
+        /* Typing Animation */
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            background: #fbbf24;
+            border-radius: 50%;
+            animation: typing 1.4s infinite ease-in-out both;
+        }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
         }
 
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+        /* Utilitários */
+        .hidden { display: none !important; }
+        
+        /* Range Input Customizado */
+        input[type=range] {
+            accent-color: #fbbf24;
         }
     </style>
 </head>
-<body class="h-screen flex items-center justify-center p-4">
-    <div class="bg-glow"></div>
+<body class="bg-gradient-to-br from-slate-900 via-black to-slate-800 h-screen w-screen text-white relative">
 
-    <div id="login-screen" class="glass p-10 rounded-3xl w-full max-w-md text-center">
-        <div class="mb-8">
-            <div class="w-16 h-16 bg-cyan-500 rounded-2xl mx-auto flex items-center justify-center glow-cyan">
-                <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A10.003 10.003 0 0012 3c1.268 0 2.39.234 3.41.659m-4.74 12.892A8 8 0 1118.008 4.5a3 3 0 00-4.791 1.625m-4.74 12.892a3 3 0 001.94 1.453"></path></svg>
-            </div>
-            <h1 class="text-2xl font-bold mt-6 text-glow">Autenticação Jarvis</h1>
-            <p class="text-slate-400 text-sm mt-2">Conecte-se ao núcleo de inteligência</p>
-        </div>
+    <div id="particles" class="absolute inset-0 z-0 pointer-events-none overflow-hidden"></div>
 
-        <div id="auth-form" class="space-y-4">
-            <input type="text" id="phone" placeholder="+55 (DDD) 99999-9999" class="w-full bg-slate-900/50 border border-slate-700 rounded-xl p-4 outline-none focus:border-cyan-500 transition">
-            <button onclick="requestCode()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold p-4 rounded-xl transition glow-cyan">Solicitar Acesso</button>
-        </div>
+    <div id="loadingOverlay" class="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center hidden">
+        <div class="animate-spin text-yellow-400 text-5xl mb-4"><i class="fas fa-circle-notch"></i></div>
+        <p class="text-yellow-400 font-king tracking-widest">CARREGANDO...</p>
+    </div>
 
-        <div id="verify-form" class="space-y-4 hidden">
-            <input type="text" id="code" placeholder="Código de Verificação" class="w-full bg-slate-900/50 border border-slate-700 rounded-xl p-4 outline-none focus:border-cyan-500 transition">
-            <button onclick="verifyCode()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold p-4 rounded-xl transition">Confirmar Identidade</button>
+    <div id="loginScreen" class="absolute inset-0 z-40 flex items-center justify-center p-4">
+        <div class="bg-black/60 backdrop-blur-md p-8 rounded-3xl border border-yellow-500/30 shadow-2xl max-w-md w-full text-center crown-glow">
+            <div class="text-6xl text-yellow-400 mb-6 crown-glow"><i class="fas fa-crown"></i></div>
+            <h1 class="text-4xl text-yellow-400 mb-2 font-bold tracking-wider">KING AI</h1>
+            <p class="text-gray-400 mb-8">Seu assistente real pessoal</p>
+            <button id="loginBtn" class="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-4 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-[0_0_20px_rgba(234,179,8,0.5)]">
+                ENTRAR NO REINO
+            </button>
         </div>
     </div>
 
-    <div id="app-screen" class="glass rounded-3xl w-full max-w-5xl h-[85vh] flex flex-col hidden overflow-hidden">
-        <div class="p-6 border-b border-white/5 flex justify-between items-center bg-slate-900/20">
-            <div class="flex items-center gap-4">
-                <div class="w-3 h-3 bg-cyan-500 rounded-full animate-pulse"></div>
-                <span class="font-semibold tracking-wider text-cyan-400">JARVIS CORE V3</span>
+    <div id="chatScreen" class="absolute inset-0 z-10 flex flex-col hidden">
+        
+        <header class="bg-black/50 backdrop-blur-md border-b border-yellow-500/20 p-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-yellow-500 rounded-full flex items-center justify-center crown-glow">
+                    <i class="fas fa-crown text-black"></i>
+                </div>
+                <div>
+                    <h2 class="text-yellow-400 font-bold text-lg leading-none">King AI</h2>
+                    <span class="text-xs text-green-400 flex items-center gap-1">
+                        <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span> Online
+                    </span>
+                </div>
             </div>
-            <div class="flex gap-4">
-                <button onclick="toggleCam()" class="p-2 hover:bg-white/5 rounded-lg transition text-slate-400" title="Câmera Biométrica">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            
+            <div class="flex gap-3">
+                <button id="themeToggle" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+                    <i class="fas fa-sun text-yellow-400"></i>
+                </button>
+                <button id="refreshBtn" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors text-yellow-400" title="Apagar última">
+                    <i class="fas fa-undo"></i>
+                </button>
+                <button id="settingsBtn" class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors text-yellow-400">
+                    <i class="fas fa-cog"></i>
                 </button>
             </div>
-        </div>
+        </header>
 
-        <div id="cam-container" class="relative hidden bg-black h-64 border-b border-cyan-900/30">
-            <video id="video" class="w-full h-full object-cover opacity-60" autoplay muted></video>
-            <canvas id="overlay" class="absolute top-0 left-0 w-full h-full"></canvas>
-            <div class="absolute bottom-4 left-4 text-[10px] text-cyan-500 font-mono">SCANNING FOR BIOMETRIC DATA...</div>
-        </div>
+        <main id="chatMessages" class="flex-1 overflow-y-auto p-4 scroll-smooth">
+            </main>
 
-        <div id="chat-container" class="flex-1 overflow-y-auto p-8 space-y-6">
-            <div class="bot-message p-5 rounded-2xl max-w-2xl">
-                <p class="text-sm">Saudações. Sistemas integrados e APIs de inteligência ativas. Como posso auxiliar em sua pesquisa hoje?</p>
-            </div>
-        </div>
-
-        <div class="p-8 bg-slate-900/40">
-            <form onsubmit="sendMessage(event)" class="relative max-w-3xl mx-auto">
-                <input type="text" id="user-input" placeholder="Solicite uma informação ou comando..." 
-                       class="w-full bg-slate-800/50 border border-slate-700 rounded-2xl p-5 pr-16 outline-none focus:border-cyan-500/50 transition text-sm">
-                <button type="submit" class="absolute right-3 top-2.5 p-2.5 bg-cyan-600 hover:bg-cyan-500 rounded-xl transition glow-cyan">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
+        <footer class="p-4 bg-black/50 backdrop-blur-md border-t border-yellow-500/20">
+            <div class="flex items-end gap-2 max-w-4xl mx-auto relative">
+                <textarea 
+                    id="messageInput" 
+                    rows="1" 
+                    placeholder="Vossa Majestade, digite sua pergunta..." 
+                    class="w-full bg-white/5 border border-yellow-500/30 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:bg-white/10 resize-none max-h-32 transition-all scrollbar-hide"
+                ></textarea>
+                
+                <button id="sendBtn" disabled class="bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed text-black w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-[0_0_15px_rgba(234,179,8,0.3)] hover:shadow-[0_0_25px_rgba(234,179,8,0.6)] mb-0.5 shrink-0">
+                    <i class="fas fa-paper-plane"></i>
                 </button>
-            </form>
+            </div>
+        </footer>
+    </div>
+
+    <div id="settingsPanel" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex justify-end">
+        <div class="w-full max-w-sm bg-gray-900 h-full border-l border-yellow-500/30 p-6 shadow-2xl transform transition-transform animate-slideLeft overflow-y-auto">
+            <div class="flex justify-between items-center mb-8">
+                <h2 class="text-2xl text-yellow-400 font-bold">Configurações</h2>
+                <button id="closeSettings" class="text-gray-400 hover:text-white"><i class="fas fa-times text-xl"></i></button>
+            </div>
+
+            <div class="mb-8">
+                <label class="block text-gray-400 text-sm mb-2 font-bold">API KEY (Gemini)</label>
+                <input type="password" id="apiKeyInput" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 outline-none text-sm font-mono">
+                <p class="text-xs text-gray-500 mt-1">Sua chave é salva apenas no seu navegador.</p>
+            </div>
+
+            <div class="mb-8">
+                <div class="flex justify-between mb-2">
+                    <label class="text-gray-300">Intensidade do Brilho</label>
+                    <span id="glowValue" class="text-yellow-400">50%</span>
+                </div>
+                <input type="range" id="glowRange" min="0" max="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <div class="mb-8">
+                <label class="block text-gray-300 mb-2">Velocidade da Resposta</label>
+                <div class="relative">
+                    <select id="speedSelect" class="w-full bg-black border border-gray-700 text-white p-3 rounded-lg appearance-none outline-none focus:border-yellow-500">
+                        <option value="fast">Rápida (Resumida)</option>
+                        <option value="normal">Normal (Padrão)</option>
+                        <option value="detailed">Detalhada (Pensativa)</option>
+                    </select>
+                    <i class="fas fa-chevron-down absolute right-3 top-4 text-gray-400 pointer-events-none"></i>
+                </div>
+            </div>
+
+            <div class="space-y-3 mt-8 border-t border-gray-800 pt-6">
+                <button id="saveSettings" class="w-full bg-yellow-500 text-black font-bold p-3 rounded-lg hover:bg-yellow-400 transition">Salvar Alterações</button>
+                <button id="shareBtn" class="w-full bg-gray-800 text-white font-bold p-3 rounded-lg hover:bg-gray-700 transition"><i class="fas fa-share-alt mr-2"></i>Compartilhar Conversa</button>
+                <button id="saveBtn" class="w-full bg-gray-800 text-white font-bold p-3 rounded-lg hover:bg-gray-700 transition"><i class="fas fa-download mr-2"></i>Baixar Histórico</button>
+                <button id="clearBtn" class="w-full bg-red-900/30 text-red-400 border border-red-900/50 font-bold p-3 rounded-lg hover:bg-red-900/50 transition mt-4">Limpar Tudo</button>
+            </div>
+            
+            <div class="mt-8 text-center text-xs text-gray-600 font-king">
+                KING AI SYSTEM v2.0
+            </div>
         </div>
     </div>
 
     <script>
-        const session_id = 'jarvis-' + Math.random().toString(36).substr(2, 9);
+        // Configurações e Estado Global
+        const CONFIG = {
+            apiKey: 'AIzaSyA9a8QscXbFVLcVn6slY5ddmCHbpmQ5oFY', // Sua API Key (Cuidado ao compartilhar!)
+            model: 'gemini-2.0-flash-exp',
+            apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/',
+            storageKeys: {
+                history: 'king_chat_history',
+                apiKey: 'king_api_key',
+                settings: 'king_settings'
+            }
+        };
 
-        // --- AUTH FLOW ---
-        async function requestCode() {
-            const phone = document.getElementById('phone').value;
-            const res = await fetch('/auth/code', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({phone}) });
-            if(res.ok) {
-                document.getElementById('auth-form').classList.add('hidden');
-                document.getElementById('verify-form').classList.remove('hidden');
+        let chatHistory = [];
+        let isTyping = false;
+        let isDarkMode = true;
+        let glowIntensity = 50;
+        let aiSpeed = 'normal';
+        let currentApiKey = CONFIG.apiKey;
+
+        // Elementos DOM (Mapeamento com o HTML acima)
+        const elements = {
+            loginScreen: document.getElementById('loginScreen'),
+            chatScreen: document.getElementById('chatScreen'),
+            loginBtn: document.getElementById('loginBtn'),
+            chatMessages: document.getElementById('chatMessages'),
+            messageInput: document.getElementById('messageInput'),
+            sendBtn: document.getElementById('sendBtn'),
+            themeToggle: document.getElementById('themeToggle'),
+            settingsBtn: document.getElementById('settingsBtn'),
+            settingsPanel: document.getElementById('settingsPanel'),
+            closeSettings: document.getElementById('closeSettings'),
+            refreshBtn: document.getElementById('refreshBtn'),
+            saveBtn: document.getElementById('saveBtn'),
+            shareBtn: document.getElementById('shareBtn'),
+            clearBtn: document.getElementById('clearBtn'),
+            glowRange: document.getElementById('glowRange'),
+            glowValue: document.getElementById('glowValue'),
+            speedSelect: document.getElementById('speedSelect'),
+            apiKeyInput: document.getElementById('apiKeyInput'),
+            saveSettings: document.getElementById('saveSettings'),
+            loadingOverlay: document.getElementById('loadingOverlay'),
+            particles: document.getElementById('particles')
+        };
+
+        // ==================== INICIALIZAÇÃO ====================
+
+        function init() {
+            loadSettings();
+            loadChatHistory();
+            createParticles();
+            setupEventListeners();
+            autoResizeTextarea();
+        }
+
+        function loadSettings() {
+            const savedSettings = localStorage.getItem(CONFIG.storageKeys.settings);
+            if (savedSettings) {
+                const settings = JSON.parse(savedSettings);
+                glowIntensity = settings.glowIntensity || 50;
+                aiSpeed = settings.aiSpeed || 'normal';
+                currentApiKey = settings.apiKey || CONFIG.apiKey;
+                isDarkMode = settings.darkMode !== undefined ? settings.darkMode : true;
+                
+                elements.glowRange.value = glowIntensity;
+                elements.glowValue.textContent = `${glowIntensity}%`;
+                elements.speedSelect.value = aiSpeed;
+                elements.apiKeyInput.value = currentApiKey;
             }
         }
 
-        async function verifyCode() {
-            const code = document.getElementById('code').value;
-            const res = await fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code}) });
-            if(res.ok) {
-                document.getElementById('login-screen').classList.add('hidden');
-                document.getElementById('app-screen').classList.remove('hidden');
-            }
+        function saveSettingsToStorage() {
+            const settings = {
+                glowIntensity,
+                aiSpeed,
+                apiKey: currentApiKey,
+                darkMode: isDarkMode
+            };
+            localStorage.setItem(CONFIG.storageKeys.settings, JSON.stringify(settings));
         }
 
-        // --- CHAT FLOW ---
-        async function sendMessage(e) {
-            e.preventDefault();
-            const input = document.getElementById('user-input');
-            const msg = input.value;
-            if(!msg) return;
-
-            addMessage(msg, 'user');
-            input.value = '';
-
-            try {
-                const res = await fetch('/chat', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ message: msg, session_id })
-                });
-                const data = await res.json();
-                addMessage(data.text, 'bot');
-                if(data.audio) playAudio(data.audio);
-            } catch(e) {
-                addMessage("Erro na conexão com o mainframe.", 'bot');
-            }
-        }
-
-        function addMessage(text, side) {
-            const container = document.getElementById('chat-container');
-            const div = document.createElement('div');
-            div.className = side === 'user' ? 'flex justify-end' : 'flex justify-start';
-            
-            const inner = document.createElement('div');
-            inner.className = side === 'user' 
-                ? 'bg-cyan-900/40 border border-cyan-500/30 p-4 rounded-2xl max-w-lg text-sm' 
-                : 'bot-message p-5 rounded-2xl max-w-2xl text-sm whitespace-pre-wrap';
-            
-            inner.innerText = text;
-            div.appendChild(inner);
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function playAudio(b64) {
-            const audio = new Audio("data:audio/mp3;base64," + b64);
-            audio.play().catch(console.error);
-        }
-
-        // --- CAMERA FLOW ---
-        let camOpen = false;
-        async function toggleCam() {
-            const container = document.getElementById('cam-container');
-            const video = document.getElementById('video');
-            if(!camOpen) {
-                container.classList.remove('hidden');
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = stream;
-                camOpen = true;
+        function loadChatHistory() {
+            const saved = localStorage.getItem(CONFIG.storageKeys.history);
+            if (saved) {
+                chatHistory = JSON.parse(saved);
+                renderChatHistory();
             } else {
-                container.classList.add('hidden');
-                video.srcObject.getTracks().forEach(t => t.stop());
-                camOpen = false;
+                addMessage('Saudações. Eu sou o King. Como posso servi-lo hoje?', 'king');
             }
         }
-    </script>
-</body>
-</html>
+
+        function saveChatHistory() {
+            localStorage.setItem(CONFIG.storageKeys.history, JSON.stringify(chatHistory));
+        }
+
+        // ==================== EVENT LISTENERS ====================
+
+        function setupEventListeners() {
+            elements.loginBtn.addEventListener('click', handleLogin);
+            
+            elements.sendBtn.addEventListener('click', handleSendMessage);
+            elements.messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                }
+            });
+            
+            elements.messageInput.addEventListener('input', () => {
+                autoResizeTextarea();
+                elements.sendBtn.disabled = !elements.messageInput.value.trim() || isTyping;
+            });
+            
+            elements.themeToggle.addEventListener('click', toggleTheme);
+            
+            elements.settingsBtn.addEventListener('click', () => {
+                elements.settingsPanel.classList.remove('hidden');
+            });
+            
+            elements.closeSettings.addEventListener('click', () => {
+                elements.settingsPanel.classList.add('hidden');
+            });
+            
+            elements.settingsPanel.addEventListener('click', (e) => {
+                if (e.target === elements.settingsPanel) {
+                    elements.settingsPanel.classList.add('hidden');
+                }
+            });
+            
+            elements.glowRange.addEventListener('input', (e) => {
+                glowIntensity = e.target.value;
+                elements.glowValue.textContent = `${glowIntensity}%`;
+                updateGlowEffect();
+            });
+            
+            elements.speedSelect.addEventListener('change', (e) => {
+                aiSpeed = e.target.value;
+            });
+            
+            elements.apiKeyInput.addEventListener('input', (e) => {
+                currentApiKey = e.target.value.trim();
+            });
+            
+            elements.saveSettings.addEventListener('click', () => {
+                saveSettingsToStorage();
+                elements.settingsPanel.classList.add('hidden');
+                showNotification('Configurações salvas com sucesso!');
+            });
+            
+            elements.refreshBtn.addEventListener('click', handleRefresh);
+            elements.saveBtn.addEventListener('click', handleSave);
+            elements.shareBtn.addEventListener('click', handleShare);
+            elements.clearBtn.addEventListener('click', handleClear);
+        }
+
+        // ==================== UI ANIMATIONS ====================
+
+        function createParticles() {
+            const particleCount = window.innerWidth < 768 ? 12 : 20;
+            elements.particles.innerHTML = '';
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = `${Math.random() * 100}%`;
+                particle.style.top = `${Math.random() * 100}%`;
+                particle.style.animationDelay = `${Math.random() * 2}s`;
+                particle.style.animationDuration = `${4 + Math.random() * 4}s`; 
+                elements.particles.appendChild(particle);
+            }
+        }
+
+        function showLoading() {
+            elements.loadingOverlay.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            elements.loadingOverlay.classList.add('hidden');
+        }
+
+        function updateGlowEffect() {
+            document.querySelectorAll('.crown-glow').forEach(el => {
+                el.style.filter = `drop-shadow(0 0 ${glowIntensity / 4}px rgba(251,191,36,0.6))`;
+            });
+        }
+
+        function autoResizeTextarea() {
+            const textarea = elements.messageInput;
+            textarea.style.height = 'auto';
+            const maxHeight = window.innerWidth < 768 ? 120 : 150;
+            textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
+        }
+
+        function scrollToBottom() {
+            setTimeout(() => {
+                elements.chatMessages.scrollTo({
+                    top: elements.chatMessages.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }, 100);
+        }
+
+        // ==================== AUTHENTICATION ====================
+
+        function handleLogin() {
+            showLoading();
+            setTimeout(() => {
+                hideLoading();
+                elements.loginScreen.classList.add('hidden');
+                elements.chatScreen.classList.remove('hidden');
+                elements.chatScreen.classList.remove('flex'); 
+                elements.chatScreen.classList.add('flex'); 
+                elements.messageInput.focus();
+                scrollToBottom();
+            }, 1000);
+        }
+
+        // ==================== CHAT FUNCTIONS ====================
+
+        function addMessage(text, sender) {
+            const message = {
+                text,
+                sender,
+                id: Date.now(),
+                timestamp: new Date().toISOString()
+            };
+            
+            chatHistory.push(message);
+            renderMessage(message);
+            saveChatHistory();
+            scrollToBottom();
+        }
+
+        function renderMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${message.sender === 'king' ? 'justify-start' : 'justify-end'} mb-4 px-2`;
+            messageDiv.dataset.id = message.id;
+            
+            const bubble = document.createElement('div');
+            bubble.className = `relative px-4 py-3 rounded-2xl max-w-[85%] md:max-w-[70%] break-
